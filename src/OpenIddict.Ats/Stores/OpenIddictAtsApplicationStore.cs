@@ -96,27 +96,9 @@ namespace OpenIddict.Ats
 
             var query = new TableQuery<DynamicTableEntity>().Select(new[] { TableConstants.PartitionKey });
 
-            return await CountLongAsync(ct, query, cancellationToken);
+            return await OpenIddictAtsHelpers.CountLongAsync(ct, query, cancellationToken);
         }
-
-        private static async ValueTask<long> CountLongAsync(CloudTable ct, TableQuery<DynamicTableEntity> query, CancellationToken cancellationToken)
-        {
-            long counter = 0;
-            var continuationToken = default(TableContinuationToken);
-
-            do
-            {
-                var results = await ct.ExecuteQuerySegmentedAsync(query, continuationToken, cancellationToken);
-                continuationToken = results.ContinuationToken;
-                foreach (var record in results)
-                {
-                    counter++;
-                }
-            } while (continuationToken != null);
-
-            return counter;
-        }
-
+        
         /// <inheritdoc/>
         public virtual async ValueTask<long> CountAsync<TResult>(
             Func<IQueryable<TApplication>, IQueryable<TResult>> query, CancellationToken cancellationToken)
@@ -166,28 +148,30 @@ namespace OpenIddict.Ats
             var applicationDeleteQuery = new TableQuery<OpenIddictAtsApplication>().Where(filter)
                 .Select(new string[] { TableConstants.PartitionKey, TableConstants.RowKey });
 
-            await deleteAsync(ct, applicationDeleteQuery);
+            try
+            {
+                await OpenIddictAtsHelpers.DeleteAsync(ct, applicationDeleteQuery);
 
-            //if (!result.Result) //TODO KAR if deleteAsync returns 0 deleted records
-            //{
-            //    throw new OpenIddictExceptions.ConcurrencyException(SR.GetResourceString(SR.ID0239));
-            //}
+                // Delete the authorizations associated with the application.
+                ct = tableClient.GetTableReference(Options.CurrentValue.AuthorizationsCollectionName);
 
-            // Delete the authorizations associated with the application.
-            ct = tableClient.GetTableReference(Options.CurrentValue.AuthorizationsCollectionName);
+                var authDeleteQuery = new TableQuery<OpenIddictAtsAuthorization>().Where(TableQuery.GenerateFilterCondition(nameof(OpenIddictAtsAuthorization.ApplicationId), QueryComparisons.Equal, application.Id))
+                    .Select(new string[] { TableConstants.PartitionKey, TableConstants.RowKey });
 
-            var authDeleteQuery = new TableQuery<OpenIddictAtsAuthorization>().Where(TableQuery.GenerateFilterCondition(nameof(OpenIddictAtsApplication.Id), QueryComparisons.Equal, application.Id))
-                .Select(new string[] { TableConstants.PartitionKey, TableConstants.RowKey });
+                await OpenIddictAtsHelpers.DeleteAsync(ct, authDeleteQuery);
 
-            await deleteAsync(ct, authDeleteQuery);
+                // Delete the tokens associated with the application.
+                ct = tableClient.GetTableReference(Options.CurrentValue.TokensCollectionName);
 
-            // Delete the tokens associated with the application.
-            ct = tableClient.GetTableReference(Options.CurrentValue.TokensCollectionName);
+                var tokenDeleteQuery = new TableQuery<OpenIddictAtsToken>().Where(TableQuery.GenerateFilterCondition(nameof(OpenIddictAtsToken.ApplicationId), QueryComparisons.Equal, application.Id))
+                    .Select(new string[] { TableConstants.PartitionKey, TableConstants.RowKey });
 
-            var tokenDeleteQuery = new TableQuery<OpenIddictAtsToken>().Where(TableQuery.GenerateFilterCondition(nameof(OpenIddictAtsApplication.Id), QueryComparisons.Equal, application.Id))
-                .Select(new string[] { TableConstants.PartitionKey, TableConstants.RowKey });
-
-            await deleteAsync(ct, tokenDeleteQuery);
+                await OpenIddictAtsHelpers.DeleteAsync(ct, tokenDeleteQuery);
+            }
+            catch (StorageException exception)
+            {
+                throw new OpenIddictExceptions.ConcurrencyException(SR.GetResourceString(SR.ID0239), exception);
+            }
         }
 
         /// <inheritdoc/>
@@ -241,7 +225,38 @@ namespace OpenIddict.Ats
 
             async IAsyncEnumerable<TApplication> ExecuteAsync([EnumeratorCancellation] CancellationToken cancellationToken)
             {
-                //TODO KAR EF version
+                var tableClient = GetCloudTableClient();
+                CloudTable ct = tableClient.GetTableReference(Options.CurrentValue.ApplicationsCollectionName);
+
+                //TODO KAR how to do contains?
+                //var gtFilter = TableQuery.GenerateFilterCondition(nameof(OpenIddictAtsApplication.PostLogoutRedirectUris), QueryComparisons.GreaterThanOrEqual, address);
+                //var ltFilter = TableQuery.GenerateFilterCondition(nameof(OpenIddictAtsApplication.PostLogoutRedirectUris), QueryComparisons.LessThanOrEqual, address);
+
+                //var filter = TableQuery.CombineFilters(gtFilter,
+                //TableOperators.And,
+                //ltFilter);
+
+                var query = ct.CreateQuery<TApplication>()
+                    //.Where(filter)
+                    .AsTableQuery();
+
+                //StartsWith with Azure Tables by using a combination of QueryComparisons.GreaterThanOrEqual and QueryComparisons.LessThan.
+                var continuationToken = default(TableContinuationToken);
+
+                do
+                {
+                    var results = await ct.ExecuteQuerySegmentedAsync(query, continuationToken, cancellationToken);
+                    continuationToken = results.ContinuationToken;
+
+                    var tempResults = results.Where(a => a.PostLogoutRedirectUris!.Contains(address)); //TODO KAR have to bring back all results and filter myself?
+
+                    foreach (var record in tempResults)
+                    {
+                        yield return record;
+                    }
+                } while (continuationToken != null);
+
+                //EF
                 //var applications = (from application in Applications
                 //                    where application.PostLogoutRedirectUris!.Contains(address)
                 //                    select application).AsAsyncEnumerable(cancellationToken);
@@ -255,14 +270,15 @@ namespace OpenIddict.Ats
                 //    }
                 //}
 
-                var database = await Context.GetDatabaseAsync(cancellationToken);
-                var collection = database.GetCollection<TApplication>(Options.CurrentValue.ApplicationsCollectionName);
+                //mongo
+                //var database = await Context.GetDatabaseAsync(cancellationToken);
+                //var collection = database.GetCollection<TApplication>(Options.CurrentValue.ApplicationsCollectionName);
 
-                await foreach (var application in collection.Find(application =>
-                    application.PostLogoutRedirectUris.Contains(address)).ToAsyncEnumerable(cancellationToken))
-                {
-                    yield return application;
-                }
+                //await foreach (var application in collection.Find(application =>
+                //    application.PostLogoutRedirectUris.Contains(address)).ToAsyncEnumerable(cancellationToken))
+                //{
+                //    yield return application;
+                //}
             }
         }
 
@@ -279,6 +295,7 @@ namespace OpenIddict.Ats
 
             async IAsyncEnumerable<TApplication> ExecuteAsync([EnumeratorCancellation] CancellationToken cancellationToken)
             {
+                
                 //TODO KAR EF version
                 //var applications = (from application in Applications
                 //                    where application.RedirectUris!.Contains(address)
@@ -293,14 +310,15 @@ namespace OpenIddict.Ats
                 //    }
                 //}
 
-                var database = await Context.GetDatabaseAsync(cancellationToken);
-                var collection = database.GetCollection<TApplication>(Options.CurrentValue.ApplicationsCollectionName);
+                //mongo
+                //var database = await Context.GetDatabaseAsync(cancellationToken);
+                //var collection = database.GetCollection<TApplication>(Options.CurrentValue.ApplicationsCollectionName);
 
-                await foreach (var application in collection.Find(application =>
-                    application.RedirectUris.Contains(address)).ToAsyncEnumerable(cancellationToken))
-                {
-                    yield return application;
-                }
+                //await foreach (var application in collection.Find(application =>
+                //    application.RedirectUris.Contains(address)).ToAsyncEnumerable(cancellationToken))
+                //{
+                //    yield return application;
+                //}
             }
         }
 
@@ -314,11 +332,14 @@ namespace OpenIddict.Ats
                 throw new ArgumentNullException(nameof(query));
             }
 
-            throw new NotImplementedException();
+            
+            var tableClient = GetCloudTableClient();
+            CloudTable ct = tableClient.GetTableReference(Options.CurrentValue.ApplicationsCollectionName);
 
-            //TODO KAR
-            //var tableClient = GetCloudTableClient();
-            //CloudTable ct = tableClient.GetTableReference(Options.CurrentValue.ApplicationsCollectionName);
+            //TODO KAR .AsTableQuery().FirstOrDefaultAsync so how can I get it working here?
+
+            return await ((TResult)query(ct.CreateQuery<TApplication>().AsQueryable(), state)).FirstOrDefaultAsync(cancellationToken);
+
 
             //var test = ct.CreateQuery<TApplication>()
             //    .AsTableQuery();
@@ -394,18 +415,27 @@ namespace OpenIddict.Ats
             {
                 throw new ArgumentNullException(nameof(application));
             }
-            //TODO KAR another EF caching one
 
-            //TODO KAR this is what mongodb has. the model has:
-            // public virtual IReadOnlyDictionary<CultureInfo, string> DisplayNames { get; set; }
-            //= ImmutableDictionary.Create<CultureInfo, string>();
-
-            if (application.DisplayNames is null || application.DisplayNames.Count == 0)
+            if (string.IsNullOrEmpty(application.DisplayNames))
             {
                 return new ValueTask<ImmutableDictionary<CultureInfo, string>>(ImmutableDictionary.Create<CultureInfo, string>());
             }
 
-            return new ValueTask<ImmutableDictionary<CultureInfo, string>>(application.DisplayNames.ToImmutableDictionary());
+            using var document = JsonDocument.Parse(application.DisplayNames);
+            var builder = ImmutableDictionary.CreateBuilder<CultureInfo, string>();
+
+            foreach (var property in document.RootElement.EnumerateObject())
+            {
+                var value = property.Value.GetString();
+                if (string.IsNullOrEmpty(value))
+                {
+                    continue;
+                }
+
+                builder[CultureInfo.GetCultureInfo(property.Name)] = value;
+            }
+
+            return new ValueTask<ImmutableDictionary<CultureInfo, string>>(builder.ToImmutable());
         }
 
         /// <inheritdoc/>
@@ -427,44 +457,67 @@ namespace OpenIddict.Ats
         public virtual ValueTask<ImmutableArray<string>> GetPermissionsAsync(
             TApplication application, CancellationToken cancellationToken)
         {
-            //TODO KAR another EF caching one
-
             if (application is null)
             {
                 throw new ArgumentNullException(nameof(application));
             }
 
-            if (application.Permissions is null || application.Permissions.Count == 0)
+            if (string.IsNullOrEmpty(application.Permissions))
             {
                 return new ValueTask<ImmutableArray<string>>(ImmutableArray.Create<string>());
             }
 
-            return new ValueTask<ImmutableArray<string>>(application.Permissions.ToImmutableArray());
+            using var document = JsonDocument.Parse(application.Permissions);
+            var builder = ImmutableArray.CreateBuilder<string>(document.RootElement.GetArrayLength());
+
+            foreach (var element in document.RootElement.EnumerateArray())
+            {
+                var value = element.GetString();
+                if (string.IsNullOrEmpty(value))
+                {
+                    continue;
+                }
+
+                builder.Add(value);
+            }
+
+            return new ValueTask<ImmutableArray<string>>(builder.ToImmutable());
         }
 
         /// <inheritdoc/>
         public virtual ValueTask<ImmutableArray<string>> GetPostLogoutRedirectUrisAsync(
             TApplication application, CancellationToken cancellationToken)
         {
-            //TODO KAR another EF caching one
             if (application is null)
             {
                 throw new ArgumentNullException(nameof(application));
             }
 
-            if (application.PostLogoutRedirectUris is null || application.PostLogoutRedirectUris.Count == 0)
+            if (string.IsNullOrEmpty(application.PostLogoutRedirectUris))
             {
                 return new ValueTask<ImmutableArray<string>>(ImmutableArray.Create<string>());
             }
+            
+            using var document = JsonDocument.Parse(application.PostLogoutRedirectUris);
+            var builder = ImmutableArray.CreateBuilder<string>(document.RootElement.GetArrayLength());
 
-            return new ValueTask<ImmutableArray<string>>(application.PostLogoutRedirectUris.ToImmutableArray());
+            foreach (var element in document.RootElement.EnumerateArray())
+            {
+                var value = element.GetString();
+                if (string.IsNullOrEmpty(value))
+                {
+                    continue;
+                }
+
+                builder.Add(value);
+            }
+
+            return new ValueTask<ImmutableArray<string>>(builder.ToImmutable());
         }
 
         /// <inheritdoc/>
         public virtual ValueTask<ImmutableDictionary<string, JsonElement>> GetPropertiesAsync(TApplication application, CancellationToken cancellationToken)
         {
-            //EF used caching... what to do? //TODO KAR
-
             if (application is null)
             {
                 throw new ArgumentNullException(nameof(application));
@@ -475,7 +528,7 @@ namespace OpenIddict.Ats
                 return new ValueTask<ImmutableDictionary<string, JsonElement>>(ImmutableDictionary.Create<string, JsonElement>());
             }
 
-            using var document = JsonDocument.Parse(application.Properties.ToJson());
+            using var document = JsonDocument.Parse(application.Properties);
             var builder = ImmutableDictionary.CreateBuilder<string, JsonElement>();
 
             foreach (var property in document.RootElement.EnumerateObject())
@@ -495,12 +548,26 @@ namespace OpenIddict.Ats
                 throw new ArgumentNullException(nameof(application));
             }
 
-            if (application.RedirectUris is null || application.RedirectUris.Count == 0)
+            if (string.IsNullOrEmpty(application.RedirectUris))
             {
                 return new ValueTask<ImmutableArray<string>>(ImmutableArray.Create<string>());
             }
 
-            return new ValueTask<ImmutableArray<string>>(application.RedirectUris.ToImmutableArray());
+            using var document = JsonDocument.Parse(application.RedirectUris);
+            var builder = ImmutableArray.CreateBuilder<string>(document.RootElement.GetArrayLength());
+
+            foreach (var element in document.RootElement.EnumerateArray())
+            {
+                var value = element.GetString();
+                if (string.IsNullOrEmpty(value))
+                {
+                    continue;
+                }
+
+                builder.Add(value);
+            }
+
+            return new ValueTask<ImmutableArray<string>>(builder.ToImmutable());
         }
 
         /// <inheritdoc/>
@@ -511,12 +578,26 @@ namespace OpenIddict.Ats
                 throw new ArgumentNullException(nameof(application));
             }
 
-            if (application.Requirements is null || application.Requirements.Count == 0)
+            if (string.IsNullOrEmpty(application.Requirements))
             {
                 return new ValueTask<ImmutableArray<string>>(ImmutableArray.Create<string>());
             }
 
-            return new ValueTask<ImmutableArray<string>>(application.Requirements.ToImmutableArray());
+            using var document = JsonDocument.Parse(application.Requirements);
+            var builder = ImmutableArray.CreateBuilder<string>(document.RootElement.GetArrayLength());
+
+            foreach (var element in document.RootElement.EnumerateArray())
+            {
+                var value = element.GetString();
+                if (string.IsNullOrEmpty(value))
+                {
+                    continue;
+                }
+
+                builder.Add(value);
+            }
+
+            return new ValueTask<ImmutableArray<string>>(builder.ToImmutable());
         }
 
         /// <inheritdoc/>
@@ -579,6 +660,8 @@ namespace OpenIddict.Ats
             var tableClient = GetCloudTableClient();
             CloudTable ct = tableClient.GetTableReference(Options.CurrentValue.ApplicationsCollectionName);
 
+            throw new NotImplementedException();
+
             //var query = new TableQuery<DynamicTableEntity>().Select(new[] { TableConstants.PartitionKey });
 
             //return await CountLongAsync(ct, query, cancellationToken);
@@ -603,31 +686,8 @@ namespace OpenIddict.Ats
             //EF does this
             //private DbSet<TApplication> Applications => Context.Set<TApplication>();
 
-            return query(Applications, state).AsAsyncEnumerable(cancellationToken);
+            //return query(Applications, state).AsAsyncEnumerable(cancellationToken);
         }
-        //mongo ver below, EF above
-        //public virtual IAsyncEnumerable<TResult> ListAsync<TState, TResult>(
-        //    Func<IQueryable<TApplication>, TState, IQueryable<TResult>> query,
-        //    TState state, CancellationToken cancellationToken)
-        //{
-        //    if (query is null)
-        //    {
-        //        throw new ArgumentNullException(nameof(query));
-        //    }
-
-        //    return ExecuteAsync(cancellationToken);
-
-        //    async IAsyncEnumerable<TResult> ExecuteAsync([EnumeratorCancellation] CancellationToken cancellationToken)
-        //    {
-        //        var database = await Context.GetDatabaseAsync(cancellationToken);
-        //        var collection = database.GetCollection<TApplication>(Options.CurrentValue.ApplicationsCollectionName);
-
-        //        await foreach (var element in query(collection.AsQueryable(), state).ToAsyncEnumerable(cancellationToken))
-        //        {
-        //            yield return element;
-        //        }
-        //    }
-        //}
 
         /// <inheritdoc/>
         public virtual ValueTask SetClientIdAsync(TApplication application,
@@ -737,19 +797,6 @@ namespace OpenIddict.Ats
 
             return default;
         }
-        //mongo ver below, EF above
-        //public virtual ValueTask SetDisplayNamesAsync(TApplication application,
-        //    ImmutableDictionary<CultureInfo, string> names, CancellationToken cancellationToken)
-        //{
-        //    if (application is null)
-        //    {
-        //        throw new ArgumentNullException(nameof(application));
-        //    }
-
-        //    application.DisplayNames = names;
-
-        //    return default;
-        //}
 
         /// <inheritdoc/>
         public virtual ValueTask SetPermissionsAsync(TApplication application, ImmutableArray<string> permissions, CancellationToken cancellationToken)
@@ -787,25 +834,6 @@ namespace OpenIddict.Ats
 
             return default;
         }
-        //mongo ver below, EF above
-        //public virtual ValueTask SetPermissionsAsync(TApplication application, ImmutableArray<string> permissions, CancellationToken cancellationToken)
-        //{
-        //    if (application is null)
-        //    {
-        //        throw new ArgumentNullException(nameof(application));
-        //    }
-
-        //    if (permissions.IsDefaultOrEmpty)
-        //    {
-        //        application.Permissions = ImmutableList.Create<string>();
-
-        //        return default;
-        //    }
-
-        //    application.Permissions = permissions.ToImmutableList();
-
-        //    return default;
-        //}
 
         /// <inheritdoc/>
         public virtual ValueTask SetPostLogoutRedirectUrisAsync(TApplication application,
@@ -844,26 +872,6 @@ namespace OpenIddict.Ats
 
             return default;
         }
-        //mongo ver below, EF above
-        //public virtual ValueTask SetPostLogoutRedirectUrisAsync(TApplication application,
-        //    ImmutableArray<string> addresses, CancellationToken cancellationToken)
-        //{
-        //    if (application is null)
-        //    {
-        //        throw new ArgumentNullException(nameof(application));
-        //    }
-
-        //    if (addresses.IsDefaultOrEmpty)
-        //    {
-        //        application.PostLogoutRedirectUris = ImmutableList.Create<string>();
-
-        //        return default;
-        //    }
-
-        //    application.PostLogoutRedirectUris = addresses.ToImmutableList();
-
-        //    return default;
-        //}
 
         /// <inheritdoc/>
         public virtual ValueTask SetPropertiesAsync(TApplication application,
@@ -903,44 +911,6 @@ namespace OpenIddict.Ats
 
             return default;
         }
-        //mongo ver below, EF above
-        //public virtual ValueTask SetPropertiesAsync(TApplication application,
-        //    ImmutableDictionary<string, JsonElement> properties, CancellationToken cancellationToken)
-        //{
-        //    if (application is null)
-        //    {
-        //        throw new ArgumentNullException(nameof(application));
-        //    }
-
-        //    if (properties is null || properties.IsEmpty)
-        //    {
-        //        application.Properties = null;
-
-        //        return default;
-        //    }
-
-        //    using var stream = new MemoryStream();
-        //    using var writer = new Utf8JsonWriter(stream, new JsonWriterOptions
-        //    {
-        //        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
-        //        Indented = false
-        //    });
-
-        //    writer.WriteStartObject();
-
-        //    foreach (var property in properties)
-        //    {
-        //        writer.WritePropertyName(property.Key);
-        //        property.Value.WriteTo(writer);
-        //    }
-
-        //    writer.WriteEndObject();
-        //    writer.Flush();
-
-        //    application.Properties = BsonDocument.Parse(Encoding.UTF8.GetString(stream.ToArray()));
-
-        //    return default;
-        //}
 
         /// <inheritdoc/>
         public virtual ValueTask SetRedirectUrisAsync(TApplication application,
@@ -1065,73 +1035,19 @@ namespace OpenIddict.Ats
                 throw new ArgumentNullException(nameof(application));
             }
 
-            ////////////////////
-            //mongo
-            // Generate a new concurrency token and attach it
-            // to the application before persisting the changes.
-            //var timestamp = application.ConcurrencyToken;
-            //application.ConcurrencyToken = Guid.NewGuid().ToString();
+            var tableClient = GetCloudTableClient();
+            CloudTable ct = tableClient.GetTableReference(Options.CurrentValue.ApplicationsCollectionName);
 
-            //var database = await Context.GetDatabaseAsync(cancellationToken);
-            //var collection = database.GetCollection<TApplication>(Options.CurrentValue.ApplicationsCollectionName);
-
-            //if ((await collection.ReplaceOneAsync(entity =>
-            //    entity.Id == application.Id &&
-            //    entity.ConcurrencyToken == timestamp, application, null as ReplaceOptions, cancellationToken)).MatchedCount == 0)
-            //{
-            //    throw new OpenIddictExceptions.ConcurrencyException(SR.GetResourceString(SR.ID0239));
-            //}
-            ///////////////////
-            ///EF
-            Applications.Attach(application);
-
-            // Generate a new concurrency token and attach it
-            // to the application before persisting the changes.
-            application.ConcurrencyToken = Guid.NewGuid().ToString();
-
-            Context.Entry(application).State = EntityState.Modified;
+            TableOperation insertOrMergeOperation = TableOperation.InsertOrMerge(application);
 
             try
             {
-                await Context.SaveChangesAsync(cancellationToken);
+                await ct.ExecuteAsync(insertOrMergeOperation);
             }
-
-            catch (DbUpdateConcurrencyException exception)
+            catch (StorageException exception)
             {
-                // Reset the state of the entity to prevents future calls to SaveChangesAsync() from failing.
-                Context.Entry(application).State = EntityState.Unchanged;
-
                 throw new OpenIddictExceptions.ConcurrencyException(SR.GetResourceString(SR.ID0239), exception);
             }
-        }
-
-        private static async Task deleteAsync<T>(CloudTable ct, TableQuery<T> deleteQuery) where T : ITableEntity, new()
-        {
-            TableContinuationToken? continuationToken = null;
-
-            do
-            {
-                var tableQueryResult = ct.ExecuteQuerySegmentedAsync(deleteQuery, continuationToken);
-
-                continuationToken = tableQueryResult.Result.ContinuationToken;
-
-                // Split into chunks of 100 for batching
-                List<List<T>> rowsChunked = tableQueryResult.Result.Select((x, index) => new { Index = index, Value = x })
-                    .Where(x => x.Value != null)
-                    .GroupBy(x => x.Index / 100)
-                    .Select(x => x.Select(v => v.Value).ToList())
-                    .ToList();
-
-                // Delete each chunk of 100 in a batch
-                foreach (List<T> rows in rowsChunked)
-                {
-                    TableBatchOperation tableBatchOperation = new TableBatchOperation();
-                    rows.ForEach(x => tableBatchOperation.Add(TableOperation.Delete(x)));
-
-                    await ct.ExecuteBatchAsync(tableBatchOperation);
-                }
-            }
-            while (continuationToken != null);
         }
     }
 }

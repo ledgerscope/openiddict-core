@@ -75,51 +75,51 @@ namespace Ats.Driver
             return queryResult.Results.FirstOrDefault();
         }
 
-        /// <summary>
-        /// Executes the query and returns the results as a streamed async enumeration.
-        /// </summary>
-        /// <typeparam name="T">The type of the returned entities.</typeparam>
-        /// <param name="source">The query source.</param>
-        /// <param name="cancellationToken">The <see cref="CancellationToken"/> that can be used to abort the operation.</param>
-        /// <returns>The streamed async enumeration containing the results.</returns>
-        //internal static IAsyncEnumerable<T> ToAsyncEnumerable<T>(this IAsyncCursorSource<T> source, CancellationToken cancellationToken)
-        //{
-        //    if (source is null)
-        //    {
-        //        throw new ArgumentNullException(nameof(source));
-        //    }
+        public static async ValueTask<long> CountLongAsync(CloudTable ct, TableQuery<DynamicTableEntity> query, CancellationToken cancellationToken)
+        {
+            long counter = 0;
+            var continuationToken = default(TableContinuationToken);
 
-        //    return ExecuteAsync(source, cancellationToken);
+            do
+            {
+                var results = await ct.ExecuteQuerySegmentedAsync(query, continuationToken, cancellationToken);
+                continuationToken = results.ContinuationToken;
+                foreach (var record in results)
+                {
+                    counter++;
+                }
+            } while (continuationToken != null);
 
-        //    static async IAsyncEnumerable<T> ExecuteAsync(IAsyncCursorSource<T> source, [EnumeratorCancellation] CancellationToken cancellationToken)
-        //    {
-        //        using var cursor = await source.ToCursorAsync(cancellationToken);
+            return counter;
+        }
 
-        //        while (await cursor.MoveNextAsync(cancellationToken))
-        //        {
-        //            foreach (var element in cursor.Current)
-        //            {
-        //                yield return element;
-        //            }
-        //        }
-        //    }
-        //}
+        public static async Task DeleteAsync<T>(CloudTable ct, TableQuery<T> deleteQuery) where T : ITableEntity, new()
+        {
+            TableContinuationToken? continuationToken = null;
 
-        /// <summary>
-        /// Executes the query and returns the results as a streamed async enumeration.
-        /// </summary>
-        /// <typeparam name="T">The type of the returned entities.</typeparam>
-        /// <param name="source">The query source.</param>
-        /// <param name="cancellationToken">The <see cref="CancellationToken"/> that can be used to abort the operation.</param>
-        /// <returns>The streamed async enumeration containing the results.</returns>
-        //internal static IAsyncEnumerable<T> ToAsyncEnumerable<T>(this IQueryable<T> source, CancellationToken cancellationToken)
-        //{
-        //    if (source is null)
-        //    {
-        //        throw new ArgumentNullException(nameof(source));
-        //    }
+            do
+            {
+                var tableQueryResult = ct.ExecuteQuerySegmentedAsync(deleteQuery, continuationToken);
 
-        //    return ((IAsyncCursorSource<T>) source).ToAsyncEnumerable(cancellationToken);
-        //}
+                continuationToken = tableQueryResult.Result.ContinuationToken;
+
+                // Split into chunks of 100 for batching
+                List<List<T>> rowsChunked = tableQueryResult.Result.Select((x, index) => new { Index = index, Value = x })
+                    .Where(x => x.Value != null)
+                    .GroupBy(x => x.Index / 100)
+                    .Select(x => x.Select(v => v.Value).ToList())
+                    .ToList();
+
+                // Delete each chunk of 100 in a batch
+                foreach (List<T> rows in rowsChunked)
+                {
+                    TableBatchOperation tableBatchOperation = new TableBatchOperation();
+                    rows.ForEach(x => tableBatchOperation.Add(TableOperation.Delete(x)));
+
+                    await ct.ExecuteBatchAsync(tableBatchOperation);
+                }
+            }
+            while (continuationToken != null);
+        }
     }
 }

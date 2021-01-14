@@ -16,10 +16,13 @@ using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using Ats.Driver;
 using Microsoft.Extensions.Options;
-using MongoDB.Bson;
-using MongoDB.Driver;
-using MongoDB.Driver.Linq;
+using Microsoft.WindowsAzure.Storage;
+using Microsoft.WindowsAzure.Storage.RetryPolicies;
+using Microsoft.WindowsAzure.Storage.Table;
+using Microsoft.WindowsAzure.Storage.Table.Protocol;
+using Microsoft.WindowsAzure.Storage.Table.Queryable;
 using OpenIddict.Abstractions;
 using OpenIddict.Ats.Models;
 using SR = OpenIddict.Abstractions.OpenIddictResources;
@@ -31,7 +34,7 @@ namespace OpenIddict.Ats
     /// </summary>
     /// <typeparam name="TScope">The type of the Scope entity.</typeparam>
     public class OpenIddictAtsScopeStore<TScope> : IOpenIddictScopeStore<TScope>
-        where TScope : OpenIddictAtsScope
+        where TScope : OpenIddictAtsScope, new()
     {
         public OpenIddictAtsScopeStore(
             IOpenIddictAtsContext context,
@@ -39,6 +42,8 @@ namespace OpenIddict.Ats
         {
             Context = context;
             Options = options;
+
+            ConnectionString = "_applicationConfig.GetConnectionString(ConnectionStringKeys.Azure)"; //TODO KAR
         }
 
         /// <summary>
@@ -51,13 +56,47 @@ namespace OpenIddict.Ats
         /// </summary>
         protected IOptionsMonitor<OpenIddictAtsOptions> Options { get; }
 
+        public string ConnectionString { get; set; }
+
+        public CloudStorageAccount GetStorageAccount()
+        {
+            if (this.ConnectionString != null)
+            {
+                return CloudStorageAccount.Parse(this.ConnectionString);
+            }
+            else
+            {
+                string configConnString = "_applicationConfig.GetConnectionString(ConnectionStringKeys.Azure)"; //TODO KAR
+                return CloudStorageAccount.Parse(configConnString);
+            }
+        }
+
+        public TableRequestOptions TableRequestOptions { get; } = new TableRequestOptions()
+        {
+            RetryPolicy = new ExponentialRetry(),
+            MaximumExecutionTime = TimeSpan.FromMinutes(10),
+            ServerTimeout = TimeSpan.FromMinutes(1)
+        };
+
+        public CloudTableClient GetCloudTableClient()
+        {
+            CloudStorageAccount account = GetStorageAccount();
+
+            var tableClient = account.CreateCloudTableClient();
+            tableClient.DefaultRequestOptions = TableRequestOptions;
+
+            return tableClient;
+        }
+
         /// <inheritdoc/>
         public virtual async ValueTask<long> CountAsync(CancellationToken cancellationToken)
         {
-            var database = await Context.GetDatabaseAsync(cancellationToken);
-            var collection = database.GetCollection<TScope>(Options.CurrentValue.ScopesCollectionName);
+            var tableClient = GetCloudTableClient();
+            CloudTable ct = tableClient.GetTableReference(Options.CurrentValue.ScopesCollectionName);
 
-            return await collection.CountDocumentsAsync(FilterDefinition<TScope>.Empty, null, cancellationToken);
+            var query = new TableQuery<DynamicTableEntity>().Select(new[] { TableConstants.PartitionKey });
+
+            return await OpenIddictAtsHelpers.CountLongAsync(ct, query, cancellationToken);
         }
 
         /// <inheritdoc/>
@@ -69,10 +108,7 @@ namespace OpenIddict.Ats
                 throw new ArgumentNullException(nameof(query));
             }
 
-            var database = await Context.GetDatabaseAsync(cancellationToken);
-            var collection = database.GetCollection<TScope>(Options.CurrentValue.ScopesCollectionName);
-
-            return await ((TScope) query(collection.AsQueryable())).LongCountAsync(cancellationToken); //TODO KAR removed IMongoQueryable<>
+            throw new NotImplementedException(); //TODO KAR<>
         }
 
         /// <inheritdoc/>
@@ -83,10 +119,12 @@ namespace OpenIddict.Ats
                 throw new ArgumentNullException(nameof(scope));
             }
 
-            var database = await Context.GetDatabaseAsync(cancellationToken);
-            var collection = database.GetCollection<TScope>(Options.CurrentValue.ScopesCollectionName);
+            var tableClient = GetCloudTableClient();
+            CloudTable ct = tableClient.GetTableReference(Options.CurrentValue.ScopesCollectionName);
 
-            await collection.InsertOneAsync(scope, null, cancellationToken);
+            TableOperation insertOrMergeOperation = TableOperation.InsertOrMerge(scope);
+
+            await ct.ExecuteAsync(insertOrMergeOperation, cancellationToken);
         }
 
         /// <inheritdoc/>
@@ -97,14 +135,26 @@ namespace OpenIddict.Ats
                 throw new ArgumentNullException(nameof(scope));
             }
 
-            var database = await Context.GetDatabaseAsync(cancellationToken);
-            var collection = database.GetCollection<TScope>(Options.CurrentValue.ScopesCollectionName);
+            var tableClient = GetCloudTableClient();
+            CloudTable ct = tableClient.GetTableReference(Options.CurrentValue.ScopesCollectionName);
 
-            if ((await collection.DeleteOneAsync(entity =>
-                entity.Id == scope.Id &&
-                entity.ConcurrencyToken == scope.ConcurrencyToken, cancellationToken)).DeletedCount == 0)
+            var idFilter = TableQuery.GenerateFilterCondition(nameof(OpenIddictAtsScope.Id), QueryComparisons.Equal, scope.Id);
+            var tokenFilter = TableQuery.GenerateFilterCondition(nameof(OpenIddictAtsScope.ConcurrencyToken), QueryComparisons.Equal, scope.ConcurrencyToken);
+
+            var filter = TableQuery.CombineFilters(idFilter,
+                TableOperators.And,
+                tokenFilter);
+
+            var tokenDeleteQuery = new TableQuery<OpenIddictAtsScope>().Where(filter)
+                .Select(new string[] { TableConstants.PartitionKey, TableConstants.RowKey });
+
+            try
             {
-                throw new OpenIddictExceptions.ConcurrencyException(SR.GetResourceString(SR.ID0245));
+                await OpenIddictAtsHelpers.DeleteAsync(ct, tokenDeleteQuery);
+            }
+            catch (StorageException exception)
+            {
+                throw new OpenIddictExceptions.ConcurrencyException(SR.GetResourceString(SR.ID0247), exception);
             }
         }
 
@@ -116,10 +166,15 @@ namespace OpenIddict.Ats
                 throw new ArgumentException(SR.GetResourceString(SR.ID0195), nameof(identifier));
             }
 
-            var database = await Context.GetDatabaseAsync(cancellationToken);
-            var collection = database.GetCollection<TScope>(Options.CurrentValue.ScopesCollectionName);
+            var tableClient = GetCloudTableClient();
+            CloudTable ct = tableClient.GetTableReference(Options.CurrentValue.ScopesCollectionName);
 
-            return await collection.Find(scope => scope.Id == ObjectId.Parse(identifier)).FirstOrDefaultAsync(cancellationToken);
+            var query = ct.CreateQuery<TScope>()
+                .Take(1)
+                .Where(TableQuery.GenerateFilterCondition(nameof(OpenIddictAtsScope.Id), QueryComparisons.Equal, identifier))
+                .AsTableQuery();
+
+            return await query.FirstOrDefaultAsync(cancellationToken);
         }
 
         /// <inheritdoc/>
@@ -130,10 +185,15 @@ namespace OpenIddict.Ats
                 throw new ArgumentException(SR.GetResourceString(SR.ID0202), nameof(name));
             }
 
-            var database = await Context.GetDatabaseAsync(cancellationToken);
-            var collection = database.GetCollection<TScope>(Options.CurrentValue.ScopesCollectionName);
+            var tableClient = GetCloudTableClient();
+            CloudTable ct = tableClient.GetTableReference(Options.CurrentValue.ScopesCollectionName);
 
-            return await collection.Find(scope => scope.Name == name).FirstOrDefaultAsync(cancellationToken);
+            var query = ct.CreateQuery<TScope>()
+                .Take(1)
+                .Where(TableQuery.GenerateFilterCondition(nameof(OpenIddictAtsScope.Name), QueryComparisons.Equal, name))
+                .AsTableQuery();
+
+            return await query.FirstOrDefaultAsync(cancellationToken);
         }
 
         /// <inheritdoc/>
@@ -150,9 +210,9 @@ namespace OpenIddict.Ats
             {
                 var database = await Context.GetDatabaseAsync(cancellationToken);
                 var collection = database.GetCollection<TScope>(Options.CurrentValue.ScopesCollectionName);
-
+                //TODO KAR
                 // Note: Enumerable.Contains() is deliberately used without the extension method syntax to ensure 
-                // ImmutableArray.Contains() (which is not fully supported by MongoDB) is not used instead. //TODO KAR need this code?
+                // ImmutableArray.Contains() (which is not fully supported by MongoDB) is not used instead.
                 await foreach (var scope in collection.Find(scope => Enumerable.Contains(names, scope.Name)).ToAsyncEnumerable(cancellationToken))
                 {
                     yield return scope;
@@ -195,7 +255,7 @@ namespace OpenIddict.Ats
             var database = await Context.GetDatabaseAsync(cancellationToken);
             var collection = database.GetCollection<TScope>(Options.CurrentValue.ScopesCollectionName);
 
-            return await ((TResult) query(collection.AsQueryable(), state)).FirstOrDefaultAsync(cancellationToken); //TODO KAR removed IMongoQueryable<>
+            return await ((TResult) query(collection.AsQueryable(), state)).FirstOrDefaultAsync(cancellationToken);
         }
 
         /// <inheritdoc/>
@@ -217,12 +277,26 @@ namespace OpenIddict.Ats
                 throw new ArgumentNullException(nameof(scope));
             }
 
-            if (scope.Descriptions is null || scope.Descriptions.Count == 0)
+            if (string.IsNullOrEmpty(scope.Descriptions))
             {
                 return new ValueTask<ImmutableDictionary<CultureInfo, string>>(ImmutableDictionary.Create<CultureInfo, string>());
             }
 
-            return new ValueTask<ImmutableDictionary<CultureInfo, string>>(scope.Descriptions.ToImmutableDictionary());
+            using var document = JsonDocument.Parse(scope.Properties);
+            var builder = ImmutableDictionary.CreateBuilder<CultureInfo, string>();
+
+            foreach (var property in document.RootElement.EnumerateObject())
+            {
+                var value = property.Value.GetString();
+                if (string.IsNullOrEmpty(value))
+                {
+                    continue;
+                }
+
+                builder[CultureInfo.GetCultureInfo(property.Name)] = value;
+            }
+
+            return new ValueTask<ImmutableDictionary<CultureInfo, string>>(builder.ToImmutable());
         }
 
         /// <inheritdoc/>
@@ -244,12 +318,26 @@ namespace OpenIddict.Ats
                 throw new ArgumentNullException(nameof(scope));
             }
 
-            if (scope.DisplayNames is null || scope.DisplayNames.Count == 0)
+            if (string.IsNullOrEmpty(scope.DisplayNames))
             {
                 return new ValueTask<ImmutableDictionary<CultureInfo, string>>(ImmutableDictionary.Create<CultureInfo, string>());
             }
 
-            return new ValueTask<ImmutableDictionary<CultureInfo, string>>(scope.DisplayNames.ToImmutableDictionary());
+            using var document = JsonDocument.Parse(scope.DisplayNames);
+            var builder = ImmutableDictionary.CreateBuilder<CultureInfo, string>();
+
+            foreach (var property in document.RootElement.EnumerateObject())
+            {
+                var value = property.Value.GetString();
+                if (string.IsNullOrEmpty(value))
+                {
+                    continue;
+                }
+
+                builder[CultureInfo.GetCultureInfo(property.Name)] = value;
+            }
+
+            return new ValueTask<ImmutableDictionary<CultureInfo, string>>(builder.ToImmutable());
         }
 
         /// <inheritdoc/>
@@ -260,7 +348,7 @@ namespace OpenIddict.Ats
                 throw new ArgumentNullException(nameof(scope));
             }
 
-            return new ValueTask<string?>(scope.Id.ToString());
+            return new ValueTask<string?>(scope.Id?.ToString());
         }
 
         /// <inheritdoc/>
@@ -287,7 +375,7 @@ namespace OpenIddict.Ats
                 return new ValueTask<ImmutableDictionary<string, JsonElement>>(ImmutableDictionary.Create<string, JsonElement>());
             }
 
-            using var document = JsonDocument.Parse(scope.Properties.ToJson());
+            using var document = JsonDocument.Parse(scope.Properties);
             var builder = ImmutableDictionary.CreateBuilder<string, JsonElement>();
 
             foreach (var property in document.RootElement.EnumerateObject())
@@ -306,12 +394,27 @@ namespace OpenIddict.Ats
                 throw new ArgumentNullException(nameof(scope));
             }
 
-            if (scope.Resources is null || scope.Resources.Count == 0)
+            if (scope.Resources is null)
             {
                 return new ValueTask<ImmutableArray<string>>(ImmutableArray.Create<string>());
             }
 
-            return new ValueTask<ImmutableArray<string>>(scope.Resources.ToImmutableArray());
+            using var document = JsonDocument.Parse(scope.Resources);
+            var builder = ImmutableArray.CreateBuilder<string>(document.RootElement.GetArrayLength());
+
+
+            foreach (var element in document.RootElement.EnumerateArray())
+            {
+                var value = element.GetString();
+                if (string.IsNullOrEmpty(value))
+                {
+                    continue;
+                }
+
+                builder.Add(value);
+            }
+
+            return new ValueTask<ImmutableArray<string>>(builder.ToImmutable());
         }
 
         /// <inheritdoc/>
@@ -333,25 +436,32 @@ namespace OpenIddict.Ats
         public virtual async IAsyncEnumerable<TScope> ListAsync(
             int? count, int? offset, [EnumeratorCancellation] CancellationToken cancellationToken)
         {
-            var database = await Context.GetDatabaseAsync(cancellationToken);
-            var collection = database.GetCollection<TScope>(Options.CurrentValue.ScopesCollectionName);
+            var tableClient = GetCloudTableClient();
+            CloudTable ct = tableClient.GetTableReference(Options.CurrentValue.ScopesCollectionName);
 
-            var query = (TScope) collection.AsQueryable().OrderBy(scope => scope.Id); //TODO KAR removed IMongoQueryable<>
+            long counter = 0;
+            var continuationToken = default(TableContinuationToken);
 
-            if (offset.HasValue)
+            var query = new TableQuery<TScope>();
+
+            var endRecord = count.HasValue ? count.Value + offset.GetValueOrDefault() : (int?)null;
+
+            do
             {
-                query = query.Skip(offset.Value);
-            }
-
-            if (count.HasValue)
-            {
-                query = query.Take(count.Value);
-            }
-
-            await foreach (var scope in ((IAsyncCursorSource<TScope>) query).ToAsyncEnumerable(cancellationToken))
-            {
-                yield return scope;
-            }
+                var results = await ct.ExecuteQuerySegmentedAsync(query, continuationToken, cancellationToken);
+                continuationToken = results.ContinuationToken;
+                foreach (var record in results)
+                {
+                    if (offset.GetValueOrDefault(-1) < count)
+                    {
+                        if (count < endRecord.GetValueOrDefault(int.MaxValue))
+                        {
+                            yield return record;
+                        }
+                    }
+                    counter++;
+                }
+            } while (continuationToken != null);
         }
 
         /// <inheritdoc/>
@@ -368,13 +478,18 @@ namespace OpenIddict.Ats
 
             async IAsyncEnumerable<TResult> ExecuteAsync([EnumeratorCancellation] CancellationToken cancellationToken)
             {
-                var database = await Context.GetDatabaseAsync(cancellationToken);
-                var collection = database.GetCollection<TScope>(Options.CurrentValue.ScopesCollectionName);
+                //TODO KAR
+                //ef
+                //return query(Scopes, state).AsAsyncEnumerable(cancellationToken);
 
-                await foreach (var element in query(collection.AsQueryable(), state).ToAsyncEnumerable(cancellationToken))
-                {
-                    yield return element;
-                }
+                //mongo
+                //var database = await Context.GetDatabaseAsync(cancellationToken);
+                //var collection = database.GetCollection<TScope>(Options.CurrentValue.ScopesCollectionName);
+
+                //await foreach (var element in query(collection.AsQueryable(), state).ToAsyncEnumerable(cancellationToken))
+                //{
+                //    yield return element;
+                //}
             }
         }
 
@@ -400,7 +515,32 @@ namespace OpenIddict.Ats
                 throw new ArgumentNullException(nameof(scope));
             }
 
-            scope.Descriptions = descriptions;
+            if (descriptions is null || descriptions.IsEmpty)
+            {
+                scope.Descriptions = null;
+
+                return default;
+            }
+
+            using var stream = new MemoryStream();
+            using var writer = new Utf8JsonWriter(stream, new JsonWriterOptions
+            {
+                Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+                Indented = false
+            });
+
+            writer.WriteStartObject();
+
+            foreach (var description in descriptions)
+            {
+                writer.WritePropertyName(description.Key.Name);
+                writer.WriteStringValue(description.Value);
+            }
+
+            writer.WriteEndObject();
+            writer.Flush();
+
+            scope.Descriptions = Encoding.UTF8.GetString(stream.ToArray());
 
             return default;
         }
@@ -414,7 +554,32 @@ namespace OpenIddict.Ats
                 throw new ArgumentNullException(nameof(scope));
             }
 
-            scope.DisplayNames = names;
+            if (names is null || names.IsEmpty)
+            {
+                scope.DisplayNames = null;
+
+                return default;
+            }
+
+            using var stream = new MemoryStream();
+            using var writer = new Utf8JsonWriter(stream, new JsonWriterOptions
+            {
+                Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+                Indented = false
+            });
+
+            writer.WriteStartObject();
+
+            foreach (var name in names)
+            {
+                writer.WritePropertyName(name.Key.Name);
+                writer.WriteStringValue(name.Value);
+            }
+
+            writer.WriteEndObject();
+            writer.Flush();
+
+            scope.DisplayNames = Encoding.UTF8.GetString(stream.ToArray());
 
             return default;
         }
@@ -479,7 +644,7 @@ namespace OpenIddict.Ats
             writer.WriteEndObject();
             writer.Flush();
 
-            scope.Properties = BsonDocument.Parse(Encoding.UTF8.GetString(stream.ToArray()));
+            scope.Properties = Encoding.UTF8.GetString(stream.ToArray());
 
             return default;
         }
@@ -494,12 +659,29 @@ namespace OpenIddict.Ats
 
             if (resources.IsDefaultOrEmpty)
             {
-                scope.Resources = ImmutableList.Create<string>();
+                scope.Resources = null;
 
                 return default;
             }
 
-            scope.Resources = resources.ToImmutableList();
+            using var stream = new MemoryStream();
+            using var writer = new Utf8JsonWriter(stream, new JsonWriterOptions
+            {
+                Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+                Indented = false
+            });
+
+            writer.WriteStartArray();
+
+            foreach (var resource in resources)
+            {
+                writer.WriteStringValue(resource);
+            }
+
+            writer.WriteEndArray();
+            writer.Flush();
+
+            scope.Resources = Encoding.UTF8.GetString(stream.ToArray());
 
             return default;
         }
@@ -512,19 +694,18 @@ namespace OpenIddict.Ats
                 throw new ArgumentNullException(nameof(scope));
             }
 
-            // Generate a new concurrency token and attach it
-            // to the scope before persisting the changes.
-            var timestamp = scope.ConcurrencyToken;
-            scope.ConcurrencyToken = Guid.NewGuid().ToString();
+            var tableClient = GetCloudTableClient();
+            CloudTable ct = tableClient.GetTableReference(Options.CurrentValue.ScopesCollectionName);
 
-            var database = await Context.GetDatabaseAsync(cancellationToken);
-            var collection = database.GetCollection<TScope>(Options.CurrentValue.ScopesCollectionName);
+            TableOperation insertOrMergeOperation = TableOperation.InsertOrMerge(scope);
 
-            if ((await collection.ReplaceOneAsync(entity =>
-                entity.Id == scope.Id &&
-                entity.ConcurrencyToken == timestamp, scope, null as ReplaceOptions, cancellationToken)).MatchedCount == 0)
+            try
             {
-                throw new OpenIddictExceptions.ConcurrencyException(SR.GetResourceString(SR.ID0245));
+                await ct.ExecuteAsync(insertOrMergeOperation);
+            }
+            catch (StorageException exception)
+            {
+                throw new OpenIddictExceptions.ConcurrencyException(SR.GetResourceString(SR.ID0241), exception);
             }
         }
     }

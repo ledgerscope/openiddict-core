@@ -95,17 +95,17 @@ namespace OpenIddict.Ats.Models
         /// <summary>
         /// Gets or sets the additional properties associated with the current application.
         /// </summary>
-        public virtual JsonDocument? Properties { get; set; }
+        public virtual string? Properties { get; set; }
 
         /// <summary>
         /// Gets or sets the callback URLs associated with the current application.
         /// </summary>
-        public virtual IReadOnlyList<string> RedirectUris { get; set; } = ImmutableList.Create<string>();
+        public virtual string? RedirectUris { get; set; }
 
         /// <summary>
         /// Gets or sets the requirements associated with the current application.
         /// </summary>
-        public virtual IReadOnlyList<string> Requirements { get; set; } = ImmutableList.Create<string>();
+        public virtual string? Requirements { get; set; }
 
         /// <summary>
         /// Gets or sets the application type

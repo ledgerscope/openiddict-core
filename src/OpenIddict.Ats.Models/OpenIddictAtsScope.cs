@@ -8,6 +8,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
+using Microsoft.WindowsAzure.Storage.Table;
 
 namespace OpenIddict.Ats.Models
 {
@@ -28,7 +29,7 @@ namespace OpenIddict.Ats.Models
     ///// </summary>
     //[DebuggerDisplay("Id = {Id.ToString(),nq} ; Name = {Name,nq}")]
     //public class OpenIddictAtsScope<TKey> where TKey : IEquatable<TKey>
-    public class OpenIddictAtsScope
+    public class OpenIddictAtsScope : TableEntity
     {
         /// <summary>
         /// Gets or sets the concurrency token.
@@ -58,7 +59,7 @@ namespace OpenIddict.Ats.Models
         /// <summary>
         /// Gets or sets the unique identifier associated with the current scope.
         /// </summary>
-        public virtual TKey? Id { get; set; }
+        public virtual string? Id { get; set; }
 
         /// <summary>
         /// Gets or sets the unique name associated with the current scope.

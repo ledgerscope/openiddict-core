@@ -59,7 +59,7 @@ namespace OpenIddict.Ats.Models
         /// <summary>
         /// Gets or sets the unique identifier associated with the current authorization.
         /// </summary>
-        public virtual TKey? Id { get; set; }
+        public virtual string? Id { get; set; }
 
         /// <summary>
         /// Gets or sets the additional properties associated with the current authorization.

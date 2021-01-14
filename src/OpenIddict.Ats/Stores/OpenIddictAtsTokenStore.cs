@@ -15,7 +15,13 @@ using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using Ats.Driver;
 using Microsoft.Extensions.Options;
+using Microsoft.WindowsAzure.Storage;
+using Microsoft.WindowsAzure.Storage.RetryPolicies;
+using Microsoft.WindowsAzure.Storage.Table;
+using Microsoft.WindowsAzure.Storage.Table.Protocol;
+using Microsoft.WindowsAzure.Storage.Table.Queryable;
 using OpenIddict.Abstractions;
 using OpenIddict.Ats.Models;
 using static OpenIddict.Abstractions.OpenIddictConstants;
@@ -28,7 +34,7 @@ namespace OpenIddict.Ats
     /// </summary>
     /// <typeparam name="TToken">The type of the Token entity.</typeparam>
     public class OpenIddictAtsTokenStore<TToken> : IOpenIddictTokenStore<TToken>
-        where TToken : OpenIddictAtsToken
+        where TToken : OpenIddictAtsToken, new()
     {
         public OpenIddictAtsTokenStore(
             IOpenIddictAtsContext context,
@@ -36,6 +42,8 @@ namespace OpenIddict.Ats
         {
             Context = context;
             Options = options;
+
+            ConnectionString = "_applicationConfig.GetConnectionString(ConnectionStringKeys.Azure)"; //TODO KAR
         }
 
         /// <summary>
@@ -48,13 +56,47 @@ namespace OpenIddict.Ats
         /// </summary>
         protected IOptionsMonitor<OpenIddictAtsOptions> Options { get; }
 
+        public string ConnectionString { get; set; }
+
+        public CloudStorageAccount GetStorageAccount()
+        {
+            if (this.ConnectionString != null)
+            {
+                return CloudStorageAccount.Parse(this.ConnectionString);
+            }
+            else
+            {
+                string configConnString = "_applicationConfig.GetConnectionString(ConnectionStringKeys.Azure)"; //TODO KAR
+                return CloudStorageAccount.Parse(configConnString);
+            }
+        }
+
+        public TableRequestOptions TableRequestOptions { get; } = new TableRequestOptions()
+        {
+            RetryPolicy = new ExponentialRetry(),
+            MaximumExecutionTime = TimeSpan.FromMinutes(10),
+            ServerTimeout = TimeSpan.FromMinutes(1)
+        };
+
+        public CloudTableClient GetCloudTableClient()
+        {
+            CloudStorageAccount account = GetStorageAccount();
+
+            var tableClient = account.CreateCloudTableClient();
+            tableClient.DefaultRequestOptions = TableRequestOptions;
+
+            return tableClient;
+        }
+
         /// <inheritdoc/>
         public virtual async ValueTask<long> CountAsync(CancellationToken cancellationToken)
         {
-            var database = await Context.GetDatabaseAsync(cancellationToken);
-            var collection = database.GetCollection<TToken>(Options.CurrentValue.TokensCollectionName);
+            var tableClient = GetCloudTableClient();
+            CloudTable ct = tableClient.GetTableReference(Options.CurrentValue.TokensCollectionName);
 
-            return await collection.CountDocumentsAsync(FilterDefinition<TToken>.Empty, null, cancellationToken);
+            var query = new TableQuery<DynamicTableEntity>().Select(new[] { TableConstants.PartitionKey });
+
+            return await OpenIddictAtsHelpers.CountLongAsync(ct, query, cancellationToken);
         }
 
         /// <inheritdoc/>
@@ -66,10 +108,12 @@ namespace OpenIddict.Ats
                 throw new ArgumentNullException(nameof(query));
             }
 
-            var database = await Context.GetDatabaseAsync(cancellationToken);
-            var collection = database.GetCollection<TToken>(Options.CurrentValue.TokensCollectionName);
+            throw new NotImplementedException(); //TODO KAR
 
-            return await ((TToken) query(collection.AsQueryable())).LongCountAsync(cancellationToken); //TODO KAR removed IMongoQueryable<>
+            //var database = await Context.GetDatabaseAsync(cancellationToken);
+            //var collection = database.GetCollection<TToken>(Options.CurrentValue.TokensCollectionName);
+
+            //return await ((TToken) query(collection.AsQueryable())).LongCountAsync(cancellationToken);
         }
 
         /// <inheritdoc/>
@@ -80,10 +124,12 @@ namespace OpenIddict.Ats
                 throw new ArgumentNullException(nameof(token));
             }
 
-            var database = await Context.GetDatabaseAsync(cancellationToken);
-            var collection = database.GetCollection<TToken>(Options.CurrentValue.TokensCollectionName);
+            var tableClient = GetCloudTableClient();
+            CloudTable ct = tableClient.GetTableReference(Options.CurrentValue.TokensCollectionName);
 
-            await collection.InsertOneAsync(token, null, cancellationToken);
+            TableOperation insertOrMergeOperation = TableOperation.InsertOrMerge(token);
+
+            await ct.ExecuteAsync(insertOrMergeOperation, cancellationToken);
         }
 
         /// <inheritdoc/>
@@ -94,14 +140,26 @@ namespace OpenIddict.Ats
                 throw new ArgumentNullException(nameof(token));
             }
 
-            var database = await Context.GetDatabaseAsync(cancellationToken);
-            var collection = database.GetCollection<TToken>(Options.CurrentValue.TokensCollectionName);
+            var tableClient = GetCloudTableClient();
+            CloudTable ct = tableClient.GetTableReference(Options.CurrentValue.TokensCollectionName);
 
-            if ((await collection.DeleteOneAsync(entity =>
-                entity.Id == token.Id &&
-                entity.ConcurrencyToken == token.ConcurrencyToken, cancellationToken)).DeletedCount == 0)
+            var idFilter = TableQuery.GenerateFilterCondition(nameof(OpenIddictAtsToken.Id), QueryComparisons.Equal, token.Id);
+            var tokenFilter = TableQuery.GenerateFilterCondition(nameof(OpenIddictAtsToken.ConcurrencyToken), QueryComparisons.Equal, token.ConcurrencyToken);
+
+            var filter = TableQuery.CombineFilters(idFilter,
+                TableOperators.And,
+                tokenFilter);
+
+            var tokenDeleteQuery = new TableQuery<OpenIddictAtsToken>().Where(filter)
+                .Select(new string[] { TableConstants.PartitionKey, TableConstants.RowKey });
+
+            try
             {
-                throw new OpenIddictExceptions.ConcurrencyException(SR.GetResourceString(SR.ID0247));
+                await OpenIddictAtsHelpers.DeleteAsync(ct, tokenDeleteQuery);
+            }
+            catch (StorageException exception)
+            {
+                throw new OpenIddictExceptions.ConcurrencyException(SR.GetResourceString(SR.ID0247), exception);
             }
         }
 
@@ -123,15 +181,33 @@ namespace OpenIddict.Ats
 
             async IAsyncEnumerable<TToken> ExecuteAsync([EnumeratorCancellation] CancellationToken cancellationToken)
             {
-                var database = await Context.GetDatabaseAsync(cancellationToken);
-                var collection = database.GetCollection<TToken>(Options.CurrentValue.TokensCollectionName);
+                var tableClient = GetCloudTableClient();
+                CloudTable ct = tableClient.GetTableReference(Options.CurrentValue.TokensCollectionName);
 
-                await foreach (var token in collection.Find(token =>
-                    token.ApplicationId == ObjectId.Parse(client) &&
-                    token.Subject == subject).ToAsyncEnumerable(cancellationToken))
+                var clientFilter = TableQuery.GenerateFilterCondition(nameof(OpenIddictAtsToken.ApplicationId), QueryComparisons.Equal, client);
+                var subjectFilter = TableQuery.GenerateFilterCondition(nameof(OpenIddictAtsToken.Subject), QueryComparisons.Equal, subject);
+
+                var filter = TableQuery.CombineFilters(clientFilter,
+                    TableOperators.And,
+                    subjectFilter);
+
+                var query = ct.CreateQuery<TToken>()
+                    .Where(filter)
+                    .AsTableQuery();
+
+                var continuationToken = default(TableContinuationToken);
+
+                do
                 {
-                    yield return token;
-                }
+                    var results = await ct.ExecuteQuerySegmentedAsync(query, continuationToken, cancellationToken);
+
+                    continuationToken = results.ContinuationToken;
+
+                    foreach (var token in results)
+                    {
+                        yield return token;
+                    }
+                } while (continuationToken != null);
             }
         }
 
@@ -159,16 +235,35 @@ namespace OpenIddict.Ats
 
             async IAsyncEnumerable<TToken> ExecuteAsync([EnumeratorCancellation] CancellationToken cancellationToken)
             {
-                var database = await Context.GetDatabaseAsync(cancellationToken);
-                var collection = database.GetCollection<TToken>(Options.CurrentValue.TokensCollectionName);
+                var tableClient = GetCloudTableClient();
+                CloudTable ct = tableClient.GetTableReference(Options.CurrentValue.TokensCollectionName);
 
-                await foreach (var token in collection.Find(token =>
-                    token.ApplicationId == ObjectId.Parse(client) &&
-                    token.Subject == subject &&
-                    token.Status == status).ToAsyncEnumerable(cancellationToken))
+                var clientFilter = TableQuery.GenerateFilterCondition(nameof(OpenIddictAtsToken.ApplicationId), QueryComparisons.Equal, client);
+                var subjectFilter = TableQuery.GenerateFilterCondition(nameof(OpenIddictAtsToken.Subject), QueryComparisons.Equal, subject);
+                var statusFilter = TableQuery.GenerateFilterCondition(nameof(OpenIddictAtsToken.Status), QueryComparisons.Equal, status);
+
+                var filter = TableQuery.CombineFilters(clientFilter,
+                    TableOperators.And,
+                    subjectFilter);
+                //TODO KAR how to add status filter to where clause?
+
+                var query = ct.CreateQuery<TToken>()
+                    .Where(filter)
+                    .AsTableQuery();
+
+                var continuationToken = default(TableContinuationToken);
+
+                do
                 {
-                    yield return token;
-                }
+                    var results = await ct.ExecuteQuerySegmentedAsync(query, continuationToken, cancellationToken);
+
+                    continuationToken = results.ContinuationToken;
+
+                    foreach (var token in results)
+                    {
+                        yield return token;
+                    }
+                } while (continuationToken != null);
             }
         }
 
@@ -201,17 +296,36 @@ namespace OpenIddict.Ats
 
             async IAsyncEnumerable<TToken> ExecuteAsync([EnumeratorCancellation] CancellationToken cancellationToken)
             {
-                var database = await Context.GetDatabaseAsync(cancellationToken);
-                var collection = database.GetCollection<TToken>(Options.CurrentValue.TokensCollectionName);
+                var tableClient = GetCloudTableClient();
+                CloudTable ct = tableClient.GetTableReference(Options.CurrentValue.TokensCollectionName);
 
-                await foreach (var token in collection.Find(token =>
-                    token.ApplicationId == ObjectId.Parse(client) &&
-                    token.Subject == subject &&
-                    token.Status == status &&
-                    token.Type == type).ToAsyncEnumerable(cancellationToken))
+                var clientFilter = TableQuery.GenerateFilterCondition(nameof(OpenIddictAtsToken.ApplicationId), QueryComparisons.Equal, client);
+                var subjectFilter = TableQuery.GenerateFilterCondition(nameof(OpenIddictAtsToken.Subject), QueryComparisons.Equal, subject);
+                var statusFilter = TableQuery.GenerateFilterCondition(nameof(OpenIddictAtsToken.Status), QueryComparisons.Equal, status);
+                var typeFilter = TableQuery.GenerateFilterCondition(nameof(OpenIddictAtsToken.Type), QueryComparisons.Equal, type);
+
+                var filter = TableQuery.CombineFilters(clientFilter,
+                    TableOperators.And,
+                    subjectFilter);
+                //TODO KAR how to add status and type filter to where clause?
+
+                var query = ct.CreateQuery<TToken>()
+                    .Where(filter)
+                    .AsTableQuery();
+
+                var continuationToken = default(TableContinuationToken);
+
+                do
                 {
-                    yield return token;
-                }
+                    var results = await ct.ExecuteQuerySegmentedAsync(query, continuationToken, cancellationToken);
+
+                    continuationToken = results.ContinuationToken;
+
+                    foreach (var token in results)
+                    {
+                        yield return token;
+                    }
+                } while (continuationToken != null);
             }
         }
 
@@ -227,14 +341,26 @@ namespace OpenIddict.Ats
 
             async IAsyncEnumerable<TToken> ExecuteAsync([EnumeratorCancellation] CancellationToken cancellationToken)
             {
-                var database = await Context.GetDatabaseAsync(cancellationToken);
-                var collection = database.GetCollection<TToken>(Options.CurrentValue.TokensCollectionName);
+                var tableClient = GetCloudTableClient();
+                CloudTable ct = tableClient.GetTableReference(Options.CurrentValue.TokensCollectionName);
 
-                await foreach (var token in collection.Find(token =>
-                    token.ApplicationId == ObjectId.Parse(identifier)).ToAsyncEnumerable(cancellationToken))
+                var query = ct.CreateQuery<TToken>()
+                    .Where(TableQuery.GenerateFilterCondition(nameof(OpenIddictAtsToken.ApplicationId), QueryComparisons.Equal, identifier))
+                    .AsTableQuery();
+
+                var continuationToken = default(TableContinuationToken);
+
+                do
                 {
-                    yield return token;
-                }
+                    var results = await ct.ExecuteQuerySegmentedAsync(query, continuationToken, cancellationToken);
+                    
+                    continuationToken = results.ContinuationToken;
+
+                    foreach (var token in results)
+                    {
+                        yield return token;
+                    }
+                } while (continuationToken != null);
             }
         }
 
@@ -250,14 +376,26 @@ namespace OpenIddict.Ats
 
             async IAsyncEnumerable<TToken> ExecuteAsync([EnumeratorCancellation] CancellationToken cancellationToken)
             {
-                var database = await Context.GetDatabaseAsync(cancellationToken);
-                var collection = database.GetCollection<TToken>(Options.CurrentValue.TokensCollectionName);
+                var tableClient = GetCloudTableClient();
+                CloudTable ct = tableClient.GetTableReference(Options.CurrentValue.TokensCollectionName);
 
-                await foreach (var token in collection.Find(token =>
-                    token.AuthorizationId == ObjectId.Parse(identifier)).ToAsyncEnumerable(cancellationToken))
+                var query = ct.CreateQuery<TToken>()
+                    .Where(TableQuery.GenerateFilterCondition(nameof(OpenIddictAtsToken.AuthorizationId), QueryComparisons.Equal, identifier))
+                    .AsTableQuery();
+
+                var continuationToken = default(TableContinuationToken);
+
+                do
                 {
-                    yield return token;
-                }
+                    var results = await ct.ExecuteQuerySegmentedAsync(query, continuationToken, cancellationToken);
+
+                    continuationToken = results.ContinuationToken;
+
+                    foreach (var token in results)
+                    {
+                        yield return token;
+                    }
+                } while (continuationToken != null);
             }
         }
 
@@ -269,10 +407,15 @@ namespace OpenIddict.Ats
                 throw new ArgumentException(SR.GetResourceString(SR.ID0195), nameof(identifier));
             }
 
-            var database = await Context.GetDatabaseAsync(cancellationToken);
-            var collection = database.GetCollection<TToken>(Options.CurrentValue.TokensCollectionName);
+            var tableClient = GetCloudTableClient();
+            CloudTable ct = tableClient.GetTableReference(Options.CurrentValue.TokensCollectionName);
 
-            return await collection.Find(token => token.Id == ObjectId.Parse(identifier)).FirstOrDefaultAsync(cancellationToken);
+            var query = ct.CreateQuery<TToken>()
+                .Take(1)
+                .Where(TableQuery.GenerateFilterCondition(nameof(OpenIddictAtsToken.Id), QueryComparisons.Equal, identifier))
+                .AsTableQuery();
+
+            return await query.FirstOrDefaultAsync(cancellationToken);
         }
 
         /// <inheritdoc/>
@@ -283,10 +426,15 @@ namespace OpenIddict.Ats
                 throw new ArgumentException(SR.GetResourceString(SR.ID0195), nameof(identifier));
             }
 
-            var database = await Context.GetDatabaseAsync(cancellationToken);
-            var collection = database.GetCollection<TToken>(Options.CurrentValue.TokensCollectionName);
+            var tableClient = GetCloudTableClient();
+            CloudTable ct = tableClient.GetTableReference(Options.CurrentValue.TokensCollectionName);
 
-            return await collection.Find(token => token.ReferenceId == identifier).FirstOrDefaultAsync(cancellationToken);
+            var query = ct.CreateQuery<TToken>()
+                .Take(1)
+                .Where(TableQuery.GenerateFilterCondition(nameof(OpenIddictAtsToken.ReferenceId), QueryComparisons.Equal, identifier))
+                .AsTableQuery();
+
+            return await query.FirstOrDefaultAsync(cancellationToken);
         }
 
         /// <inheritdoc/>
@@ -301,13 +449,26 @@ namespace OpenIddict.Ats
 
             async IAsyncEnumerable<TToken> ExecuteAsync([EnumeratorCancellation] CancellationToken cancellationToken)
             {
-                var database = await Context.GetDatabaseAsync(cancellationToken);
-                var collection = database.GetCollection<TToken>(Options.CurrentValue.TokensCollectionName);
+                var tableClient = GetCloudTableClient();
+                CloudTable ct = tableClient.GetTableReference(Options.CurrentValue.TokensCollectionName);
 
-                await foreach (var token in collection.Find(token => token.Subject == subject).ToAsyncEnumerable(cancellationToken))
+                var query = ct.CreateQuery<TToken>()
+                    .Where(TableQuery.GenerateFilterCondition(nameof(OpenIddictAtsToken.Subject), QueryComparisons.Equal, subject))
+                    .AsTableQuery();
+
+                var continuationToken = default(TableContinuationToken);
+
+                do
                 {
-                    yield return token;
-                }
+                    var results = await ct.ExecuteQuerySegmentedAsync(query, continuationToken, cancellationToken);
+
+                    continuationToken = results.ContinuationToken;
+
+                    foreach (var token in results)
+                    {
+                        yield return token;
+                    }
+                } while (continuationToken != null);
             }
         }
 
@@ -319,7 +480,27 @@ namespace OpenIddict.Ats
                 throw new ArgumentNullException(nameof(token));
             }
 
-            if (token.ApplicationId == ObjectId.Empty)
+            //TODO KAR is this ok?
+            //EF had
+            //if (token.Application is null)
+            //{
+            //    var reference = Context.Entry(token).Reference(entry => entry.Application);
+            //    if (reference.EntityEntry.State == EntityState.Detached)
+            //    {
+            //        return null;
+            //    }
+
+            //    await reference.LoadAsync(cancellationToken);
+            //}
+
+            //if (token.Application is null)
+            //{
+            //    return null;
+            //}
+
+            //return ConvertIdentifierToString(token.Application.Id);
+
+            if (token.ApplicationId == null)
             {
                 return new ValueTask<string?>(result: null);
             }
@@ -336,11 +517,11 @@ namespace OpenIddict.Ats
             {
                 throw new ArgumentNullException(nameof(query));
             }
+            //TODO KAR
+            //var database = await Context.GetDatabaseAsync(cancellationToken);
+            //var collection = database.GetCollection<TToken>(Options.CurrentValue.TokensCollectionName);
 
-            var database = await Context.GetDatabaseAsync(cancellationToken);
-            var collection = database.GetCollection<TToken>(Options.CurrentValue.TokensCollectionName);
-
-            return await ((TResult) query(collection.AsQueryable(), state)).FirstOrDefaultAsync(cancellationToken); //TODO KAR removed IMongoQueryable<>
+            //return await ((TResult) query(collection.AsQueryable(), state)).FirstOrDefaultAsync(cancellationToken);
         }
 
         /// <inheritdoc/>
@@ -350,8 +531,8 @@ namespace OpenIddict.Ats
             {
                 throw new ArgumentNullException(nameof(token));
             }
-
-            if (token.AuthorizationId == ObjectId.Empty)
+            //TODO KAR is this ok? see method above for similar
+            if (token.AuthorizationId == null)
             {
                 return new ValueTask<string?>(result: null);
             }
@@ -399,7 +580,7 @@ namespace OpenIddict.Ats
                 throw new ArgumentNullException(nameof(token));
             }
 
-            return new ValueTask<string?>(token.Id.ToString());
+            return new ValueTask<string?>(token.Id?.ToString());
         }
 
         /// <inheritdoc/>
@@ -426,7 +607,7 @@ namespace OpenIddict.Ats
                 return new ValueTask<ImmutableDictionary<string, JsonElement>>(ImmutableDictionary.Create<string, JsonElement>());
             }
 
-            using var document = JsonDocument.Parse(token.Properties.ToJson());
+            using var document = JsonDocument.Parse(token.Properties);
             var builder = ImmutableDictionary.CreateBuilder<string, JsonElement>();
 
             foreach (var property in document.RootElement.EnumerateObject())
@@ -516,25 +697,32 @@ namespace OpenIddict.Ats
         public virtual async IAsyncEnumerable<TToken> ListAsync(
             int? count, int? offset, [EnumeratorCancellation] CancellationToken cancellationToken)
         {
-            var database = await Context.GetDatabaseAsync(cancellationToken);
-            var collection = database.GetCollection<TToken>(Options.CurrentValue.TokensCollectionName);
+            var tableClient = GetCloudTableClient();
+            CloudTable ct = tableClient.GetTableReference(Options.CurrentValue.TokensCollectionName);
 
-            var query = (TToken) collection.AsQueryable().OrderBy(token => token.Id); //TODO KAR removed IMongoQueryable<>
+            long counter = 0;
+            var continuationToken = default(TableContinuationToken);
 
-            if (offset.HasValue)
+            var query = new TableQuery<TToken>();
+
+            var endRecord = count.HasValue ? count.Value + offset.GetValueOrDefault() : (int?)null;
+
+            do
             {
-                query = query.Skip(offset.Value);
-            }
-
-            if (count.HasValue)
-            {
-                query = query.Take(count.Value);
-            }
-
-            await foreach (var token in ((IAsyncCursorSource<TToken>) query).ToAsyncEnumerable(cancellationToken))
-            {
-                yield return token;
-            }
+                var results = await ct.ExecuteQuerySegmentedAsync(query, continuationToken, cancellationToken);
+                continuationToken = results.ContinuationToken;
+                foreach (var record in results)
+                {
+                    if (offset.GetValueOrDefault(-1) < count)
+                    {
+                        if (count < endRecord.GetValueOrDefault(int.MaxValue))
+                        {
+                            yield return record;
+                        }
+                    }
+                    counter++;
+                }
+            } while (continuationToken != null);
         }
 
         /// <inheritdoc/>
@@ -551,19 +739,21 @@ namespace OpenIddict.Ats
 
             async IAsyncEnumerable<TResult> ExecuteAsync([EnumeratorCancellation] CancellationToken cancellationToken)
             {
-                var database = await Context.GetDatabaseAsync(cancellationToken);
-                var collection = database.GetCollection<TToken>(Options.CurrentValue.TokensCollectionName);
+                //TODO KAR
+                //var database = await Context.GetDatabaseAsync(cancellationToken);
+                //var collection = database.GetCollection<TToken>(Options.CurrentValue.TokensCollectionName);
 
-                await foreach (var element in query(collection.AsQueryable(), state).ToAsyncEnumerable(cancellationToken))
-                {
-                    yield return element;
-                }
+                //await foreach (var element in query(collection.AsQueryable(), state).ToAsyncEnumerable(cancellationToken))
+                //{
+                //    yield return element;
+                //}
             }
         }
 
         /// <inheritdoc/>
         public virtual async ValueTask PruneAsync(DateTimeOffset threshold, CancellationToken cancellationToken)
         {
+            //TODO KAR
             var database = await Context.GetDatabaseAsync(cancellationToken);
             var collection = database.GetCollection<TToken>(Options.CurrentValue.TokensCollectionName);
 
@@ -615,6 +805,7 @@ namespace OpenIddict.Ats
         /// <inheritdoc/>
         public virtual ValueTask SetApplicationIdAsync(TToken token, string? identifier, CancellationToken cancellationToken)
         {
+            //TODO KAR do in AuthorizationStore then copy here
             if (token is null)
             {
                 throw new ArgumentNullException(nameof(token));
@@ -636,6 +827,7 @@ namespace OpenIddict.Ats
         /// <inheritdoc/>
         public virtual ValueTask SetAuthorizationIdAsync(TToken token, string? identifier, CancellationToken cancellationToken)
         {
+            //TODO KAR do in AuthorizationStore then copy here
             if (token is null)
             {
                 throw new ArgumentNullException(nameof(token));
@@ -727,7 +919,7 @@ namespace OpenIddict.Ats
             writer.WriteEndObject();
             writer.Flush();
 
-            token.Properties = BsonDocument.Parse(Encoding.UTF8.GetString(stream.ToArray()));
+            token.Properties = Encoding.UTF8.GetString(stream.ToArray());
 
             return default;
         }
@@ -805,19 +997,18 @@ namespace OpenIddict.Ats
                 throw new ArgumentNullException(nameof(token));
             }
 
-            // Generate a new concurrency token and attach it
-            // to the token before persisting the changes.
-            var timestamp = token.ConcurrencyToken;
-            token.ConcurrencyToken = Guid.NewGuid().ToString();
+            var tableClient = GetCloudTableClient();
+            CloudTable ct = tableClient.GetTableReference(Options.CurrentValue.TokensCollectionName);
 
-            var database = await Context.GetDatabaseAsync(cancellationToken);
-            var collection = database.GetCollection<TToken>(Options.CurrentValue.TokensCollectionName);
+            TableOperation insertOrMergeOperation = TableOperation.InsertOrMerge(token);
 
-            if ((await collection.ReplaceOneAsync(entity =>
-                entity.Id == token.Id &&
-                entity.ConcurrencyToken == timestamp, token, null as ReplaceOptions, cancellationToken)).MatchedCount == 0)
+            try
             {
-                throw new OpenIddictExceptions.ConcurrencyException(SR.GetResourceString(SR.ID0247));
+                await ct.ExecuteAsync(insertOrMergeOperation);
+            }
+            catch (StorageException exception)
+            {
+                throw new OpenIddictExceptions.ConcurrencyException(SR.GetResourceString(SR.ID0241), exception);
             }
         }
     }
