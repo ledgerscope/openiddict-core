@@ -42,8 +42,6 @@ namespace OpenIddict.Ats
         {
             Context = context;
             Options = options;
-
-            ConnectionString = "_applicationConfig.GetConnectionString(ConnectionStringKeys.Azure)"; //TODO KAR
         }
 
         /// <summary>
@@ -56,21 +54,6 @@ namespace OpenIddict.Ats
         /// </summary>
         protected IOptionsMonitor<OpenIddictAtsOptions> Options { get; }
 
-        public string ConnectionString { get; set; }
-
-        public CloudStorageAccount GetStorageAccount()
-        {
-            if (this.ConnectionString != null)
-            {
-                return CloudStorageAccount.Parse(this.ConnectionString);
-            }
-            else
-            {
-                string configConnString = "_applicationConfig.GetConnectionString(ConnectionStringKeys.Azure)"; //TODO KAR
-                return CloudStorageAccount.Parse(configConnString);
-            }
-        }
-
         public TableRequestOptions TableRequestOptions { get; } = new TableRequestOptions()
         {
             RetryPolicy = new ExponentialRetry(),
@@ -78,20 +61,10 @@ namespace OpenIddict.Ats
             ServerTimeout = TimeSpan.FromMinutes(1)
         };
 
-        public CloudTableClient GetCloudTableClient()
-        {
-            CloudStorageAccount account = GetStorageAccount();
-
-            var tableClient = account.CreateCloudTableClient();
-            tableClient.DefaultRequestOptions = TableRequestOptions;
-
-            return tableClient;
-        }
-
         /// <inheritdoc/>
         public virtual async ValueTask<long> CountAsync(CancellationToken cancellationToken)
         {
-            var tableClient = GetCloudTableClient();
+            var tableClient = await Context.GetTableClientAsync(cancellationToken);
             CloudTable ct = tableClient.GetTableReference(Options.CurrentValue.ScopesCollectionName);
 
             var query = new TableQuery<DynamicTableEntity>().Select(new[] { TableConstants.PartitionKey });
@@ -108,7 +81,26 @@ namespace OpenIddict.Ats
                 throw new ArgumentNullException(nameof(query));
             }
 
-            throw new NotImplementedException(); //TODO KAR<>
+            var tableClient = await Context.GetTableClientAsync(cancellationToken);
+            CloudTable ct = tableClient.GetTableReference(Options.CurrentValue.ApplicationsCollectionName);
+
+            var tableQuery = ct.CreateQuery<TScope>()
+                     .AsTableQuery();
+
+            long counter = 0;
+            var continuationToken = default(TableContinuationToken);
+
+            do
+            {
+                var results = await ct.ExecuteQuerySegmentedAsync(tableQuery, continuationToken, cancellationToken);
+                continuationToken = results.ContinuationToken;
+                foreach (var record in query(results.AsQueryable()))
+                {
+                    counter++;
+                }
+            } while (continuationToken != null);
+
+            return counter;
         }
 
         /// <inheritdoc/>
@@ -119,7 +111,7 @@ namespace OpenIddict.Ats
                 throw new ArgumentNullException(nameof(scope));
             }
 
-            var tableClient = GetCloudTableClient();
+            var tableClient = await Context.GetTableClientAsync(cancellationToken);
             CloudTable ct = tableClient.GetTableReference(Options.CurrentValue.ScopesCollectionName);
 
             TableOperation insertOrMergeOperation = TableOperation.InsertOrMerge(scope);
@@ -135,7 +127,7 @@ namespace OpenIddict.Ats
                 throw new ArgumentNullException(nameof(scope));
             }
 
-            var tableClient = GetCloudTableClient();
+            var tableClient = await Context.GetTableClientAsync(cancellationToken);
             CloudTable ct = tableClient.GetTableReference(Options.CurrentValue.ScopesCollectionName);
 
             var idFilter = TableQuery.GenerateFilterCondition(nameof(OpenIddictAtsScope.Id), QueryComparisons.Equal, scope.Id);
@@ -166,7 +158,7 @@ namespace OpenIddict.Ats
                 throw new ArgumentException(SR.GetResourceString(SR.ID0195), nameof(identifier));
             }
 
-            var tableClient = GetCloudTableClient();
+            var tableClient = await Context.GetTableClientAsync(cancellationToken);
             CloudTable ct = tableClient.GetTableReference(Options.CurrentValue.ScopesCollectionName);
 
             var query = ct.CreateQuery<TScope>()
@@ -185,7 +177,7 @@ namespace OpenIddict.Ats
                 throw new ArgumentException(SR.GetResourceString(SR.ID0202), nameof(name));
             }
 
-            var tableClient = GetCloudTableClient();
+            var tableClient = await Context.GetTableClientAsync(cancellationToken);
             CloudTable ct = tableClient.GetTableReference(Options.CurrentValue.ScopesCollectionName);
 
             var query = ct.CreateQuery<TScope>()
@@ -208,15 +200,26 @@ namespace OpenIddict.Ats
 
             async IAsyncEnumerable<TScope> ExecuteAsync([EnumeratorCancellation] CancellationToken cancellationToken)
             {
-                var database = await Context.GetDatabaseAsync(cancellationToken);
-                var collection = database.GetCollection<TScope>(Options.CurrentValue.ScopesCollectionName);
-                //TODO KAR
-                // Note: Enumerable.Contains() is deliberately used without the extension method syntax to ensure 
-                // ImmutableArray.Contains() (which is not fully supported by MongoDB) is not used instead.
-                await foreach (var scope in collection.Find(scope => Enumerable.Contains(names, scope.Name)).ToAsyncEnumerable(cancellationToken))
+                var tableClient = await Context.GetTableClientAsync(cancellationToken);
+                CloudTable ct = tableClient.GetTableReference(Options.CurrentValue.ScopesCollectionName);
+
+                var query = ct.CreateQuery<TScope>()
+                    .AsTableQuery();
+
+                var continuationToken = default(TableContinuationToken);
+
+                do
                 {
-                    yield return scope;
-                }
+                    var results = await ct.ExecuteQuerySegmentedAsync(query, continuationToken, cancellationToken);
+
+                    continuationToken = results.ContinuationToken;
+
+                    foreach (var scope in results.Where(scope => Enumerable.Contains(names, scope.Name)))
+                    {
+                        yield return scope;
+                    }
+
+                } while (continuationToken != null);
             }
         }
 
@@ -232,13 +235,26 @@ namespace OpenIddict.Ats
 
             async IAsyncEnumerable<TScope> ExecuteAsync([EnumeratorCancellation] CancellationToken cancellationToken)
             {
-                var database = await Context.GetDatabaseAsync(cancellationToken);
-                var collection = database.GetCollection<TScope>(Options.CurrentValue.ScopesCollectionName);
+                var tableClient = await Context.GetTableClientAsync(cancellationToken);
+                CloudTable ct = tableClient.GetTableReference(Options.CurrentValue.ScopesCollectionName);
 
-                await foreach (var scope in collection.Find(scope => scope.Resources.Contains(resource)).ToAsyncEnumerable(cancellationToken))
+                var query = ct.CreateQuery<TScope>()
+                    .AsTableQuery();
+
+                var continuationToken = default(TableContinuationToken);
+
+                do
                 {
-                    yield return scope;
-                }
+                    var results = await ct.ExecuteQuerySegmentedAsync(query, continuationToken, cancellationToken);
+
+                    continuationToken = results.ContinuationToken;
+
+                    foreach (var scope in results.Where(scope => scope.Resources != null && scope.Resources.Contains(resource)))
+                    {
+                        yield return scope;
+                    }
+
+                } while (continuationToken != null);
             }
         }
 
@@ -252,10 +268,16 @@ namespace OpenIddict.Ats
                 throw new ArgumentNullException(nameof(query));
             }
 
-            var database = await Context.GetDatabaseAsync(cancellationToken);
-            var collection = database.GetCollection<TScope>(Options.CurrentValue.ScopesCollectionName);
 
-            return await ((TResult) query(collection.AsQueryable(), state)).FirstOrDefaultAsync(cancellationToken);
+            var tableClient = await Context.GetTableClientAsync(cancellationToken);
+            CloudTable ct = tableClient.GetTableReference(Options.CurrentValue.AuthorizationsCollectionName);
+
+            var cloudQuery = ct.CreateQuery<TScope>().AsQueryable();
+            var result = query(cloudQuery, state);
+
+            //TODO KAR make async
+            //.AsTableQuery().FirstOrDefaultAsync so how can I get it working here?
+            return result.FirstOrDefault();//.FirstOrDefaultAsync(cancellationToken);        
         }
 
         /// <inheritdoc/>
@@ -436,7 +458,7 @@ namespace OpenIddict.Ats
         public virtual async IAsyncEnumerable<TScope> ListAsync(
             int? count, int? offset, [EnumeratorCancellation] CancellationToken cancellationToken)
         {
-            var tableClient = GetCloudTableClient();
+            var tableClient = await Context.GetTableClientAsync(cancellationToken);
             CloudTable ct = tableClient.GetTableReference(Options.CurrentValue.ScopesCollectionName);
 
             long counter = 0;
@@ -478,18 +500,24 @@ namespace OpenIddict.Ats
 
             async IAsyncEnumerable<TResult> ExecuteAsync([EnumeratorCancellation] CancellationToken cancellationToken)
             {
-                //TODO KAR
-                //ef
-                //return query(Scopes, state).AsAsyncEnumerable(cancellationToken);
+                var tableClient = await Context.GetTableClientAsync(cancellationToken);
+                CloudTable ct = tableClient.GetTableReference(Options.CurrentValue.ScopesCollectionName);
 
-                //mongo
-                //var database = await Context.GetDatabaseAsync(cancellationToken);
-                //var collection = database.GetCollection<TScope>(Options.CurrentValue.ScopesCollectionName);
+                var tableQuery = ct.CreateQuery<TScope>()
+                    .AsTableQuery();
 
-                //await foreach (var element in query(collection.AsQueryable(), state).ToAsyncEnumerable(cancellationToken))
-                //{
-                //    yield return element;
-                //}
+                var continuationToken = default(TableContinuationToken);
+
+                do
+                {
+                    var results = await ct.ExecuteQuerySegmentedAsync(tableQuery, continuationToken, cancellationToken);
+                    continuationToken = results.ContinuationToken;
+
+                    foreach (var scope in query(results.AsQueryable(), state))
+                    {
+                        yield return scope;
+                    }
+                } while (continuationToken != null);
             }
         }
 
@@ -694,7 +722,7 @@ namespace OpenIddict.Ats
                 throw new ArgumentNullException(nameof(scope));
             }
 
-            var tableClient = GetCloudTableClient();
+            var tableClient = await Context.GetTableClientAsync(cancellationToken);
             CloudTable ct = tableClient.GetTableReference(Options.CurrentValue.ScopesCollectionName);
 
             TableOperation insertOrMergeOperation = TableOperation.InsertOrMerge(scope);

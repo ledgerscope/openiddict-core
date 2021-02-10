@@ -26,6 +26,7 @@ using OpenIddict.Ats.Models;
 using Microsoft.WindowsAzure.Storage.Table.Queryable;
 using SR = OpenIddict.Abstractions.OpenIddictResources;
 using Ats.Driver;
+using System.ComponentModel;
 
 namespace OpenIddict.Ats
 {
@@ -42,8 +43,6 @@ namespace OpenIddict.Ats
         {
             Context = context;
             Options = options;
-
-            ConnectionString = "_applicationConfig.GetConnectionString(ConnectionStringKeys.Azure)"; //TODO KAR
         }
 
         /// <summary>
@@ -56,21 +55,6 @@ namespace OpenIddict.Ats
         /// </summary>
         protected IOptionsMonitor<OpenIddictAtsOptions> Options { get; }
 
-        public string ConnectionString { get; set; }
-
-        public CloudStorageAccount GetStorageAccount()
-        {
-            if (this.ConnectionString != null)
-            {
-                return CloudStorageAccount.Parse(this.ConnectionString);
-            }
-            else
-            {
-                string configConnString = "_applicationConfig.GetConnectionString(ConnectionStringKeys.Azure)"; //TODO KAR
-                return CloudStorageAccount.Parse(configConnString);
-            }
-        }
-
         public TableRequestOptions TableRequestOptions { get; } = new TableRequestOptions()
         {
             RetryPolicy = new ExponentialRetry(),
@@ -78,20 +62,10 @@ namespace OpenIddict.Ats
             ServerTimeout = TimeSpan.FromMinutes(1)
         };
 
-        public CloudTableClient GetCloudTableClient()
-        {
-            CloudStorageAccount account = GetStorageAccount();
-
-            var tableClient = account.CreateCloudTableClient();
-            tableClient.DefaultRequestOptions = TableRequestOptions;
-
-            return tableClient;
-        }
-
         /// <inheritdoc/>
         public virtual async ValueTask<long> CountAsync(CancellationToken cancellationToken)
         {
-            var tableClient = GetCloudTableClient();
+            var tableClient = await Context.GetTableClientAsync(cancellationToken);
             CloudTable ct = tableClient.GetTableReference(Options.CurrentValue.ApplicationsCollectionName);
 
             var query = new TableQuery<DynamicTableEntity>().Select(new[] { TableConstants.PartitionKey });
@@ -108,7 +82,26 @@ namespace OpenIddict.Ats
                 throw new ArgumentNullException(nameof(query));
             }
 
-            throw new NotImplementedException(); //TODO KAR
+            var tableClient = await Context.GetTableClientAsync(cancellationToken);
+            CloudTable ct = tableClient.GetTableReference(Options.CurrentValue.ApplicationsCollectionName);
+
+            var tableQuery = ct.CreateQuery<TApplication>()
+                     .AsTableQuery();
+
+            long counter = 0;
+            var continuationToken = default(TableContinuationToken);
+
+            do
+            {
+                var results = await ct.ExecuteQuerySegmentedAsync(tableQuery, continuationToken, cancellationToken);
+                continuationToken = results.ContinuationToken;
+                foreach (var record in query(results.AsQueryable()))
+                {
+                    counter++;
+                }
+            } while (continuationToken != null);
+
+            return counter;
         }
 
         /// <inheritdoc/>
@@ -119,7 +112,7 @@ namespace OpenIddict.Ats
                 throw new ArgumentNullException(nameof(application));
             }
 
-            var tableClient = GetCloudTableClient();
+            var tableClient = await Context.GetTableClientAsync(cancellationToken);
             CloudTable ct = tableClient.GetTableReference(Options.CurrentValue.ApplicationsCollectionName);
 
             TableOperation insertOrMergeOperation = TableOperation.InsertOrMerge(application);
@@ -135,7 +128,7 @@ namespace OpenIddict.Ats
                 throw new ArgumentNullException(nameof(application));
             }
 
-            var tableClient = GetCloudTableClient();
+            var tableClient = await Context.GetTableClientAsync(cancellationToken);
             CloudTable ct = tableClient.GetTableReference(Options.CurrentValue.ApplicationsCollectionName);
 
             var idFilter = TableQuery.GenerateFilterCondition(nameof(OpenIddictAtsApplication.Id), QueryComparisons.Equal, application.Id);
@@ -182,7 +175,7 @@ namespace OpenIddict.Ats
                 throw new ArgumentException(SR.GetResourceString(SR.ID0195), nameof(identifier));
             }
 
-            var tableClient = GetCloudTableClient();
+            var tableClient = await Context.GetTableClientAsync(cancellationToken);
             CloudTable ct = tableClient.GetTableReference(Options.CurrentValue.ApplicationsCollectionName);
 
             var query = ct.CreateQuery<TApplication>()
@@ -201,7 +194,7 @@ namespace OpenIddict.Ats
                 throw new ArgumentException(SR.GetResourceString(SR.ID0195), nameof(identifier));
             }
 
-            var tableClient = GetCloudTableClient();
+            var tableClient = await Context.GetTableClientAsync(cancellationToken);
             CloudTable ct = tableClient.GetTableReference(Options.CurrentValue.ApplicationsCollectionName);
 
             var query = ct.CreateQuery<TApplication>()
@@ -225,22 +218,12 @@ namespace OpenIddict.Ats
 
             async IAsyncEnumerable<TApplication> ExecuteAsync([EnumeratorCancellation] CancellationToken cancellationToken)
             {
-                var tableClient = GetCloudTableClient();
+                var tableClient = await Context.GetTableClientAsync(cancellationToken);
                 CloudTable ct = tableClient.GetTableReference(Options.CurrentValue.ApplicationsCollectionName);
 
-                //TODO KAR how to do contains?
-                //var gtFilter = TableQuery.GenerateFilterCondition(nameof(OpenIddictAtsApplication.PostLogoutRedirectUris), QueryComparisons.GreaterThanOrEqual, address);
-                //var ltFilter = TableQuery.GenerateFilterCondition(nameof(OpenIddictAtsApplication.PostLogoutRedirectUris), QueryComparisons.LessThanOrEqual, address);
-
-                //var filter = TableQuery.CombineFilters(gtFilter,
-                //TableOperators.And,
-                //ltFilter);
-
                 var query = ct.CreateQuery<TApplication>()
-                    //.Where(filter)
                     .AsTableQuery();
 
-                //StartsWith with Azure Tables by using a combination of QueryComparisons.GreaterThanOrEqual and QueryComparisons.LessThan.
                 var continuationToken = default(TableContinuationToken);
 
                 do
@@ -248,37 +231,17 @@ namespace OpenIddict.Ats
                     var results = await ct.ExecuteQuerySegmentedAsync(query, continuationToken, cancellationToken);
                     continuationToken = results.ContinuationToken;
 
-                    var tempResults = results.Where(a => a.PostLogoutRedirectUris!.Contains(address)); //TODO KAR have to bring back all results and filter myself?
+                    var tempApplications = results.Where(a => a.PostLogoutRedirectUris!.Contains(address));
 
-                    foreach (var record in tempResults)
+                    foreach (var application in tempApplications)
                     {
-                        yield return record;
+                        var addresses = await GetPostLogoutRedirectUrisAsync(application, cancellationToken);
+                        if (addresses.Contains(address, StringComparer.Ordinal))
+                        {
+                            yield return application;
+                        }
                     }
                 } while (continuationToken != null);
-
-                //EF
-                //var applications = (from application in Applications
-                //                    where application.PostLogoutRedirectUris!.Contains(address)
-                //                    select application).AsAsyncEnumerable(cancellationToken);
-
-                //await foreach (var application in applications)
-                //{
-                //    var addresses = await GetPostLogoutRedirectUrisAsync(application, cancellationToken);
-                //    if (addresses.Contains(address, StringComparer.Ordinal))
-                //    {
-                //        yield return application;
-                //    }
-                //}
-
-                //mongo
-                //var database = await Context.GetDatabaseAsync(cancellationToken);
-                //var collection = database.GetCollection<TApplication>(Options.CurrentValue.ApplicationsCollectionName);
-
-                //await foreach (var application in collection.Find(application =>
-                //    application.PostLogoutRedirectUris.Contains(address)).ToAsyncEnumerable(cancellationToken))
-                //{
-                //    yield return application;
-                //}
             }
         }
 
@@ -295,30 +258,30 @@ namespace OpenIddict.Ats
 
             async IAsyncEnumerable<TApplication> ExecuteAsync([EnumeratorCancellation] CancellationToken cancellationToken)
             {
-                
-                //TODO KAR EF version
-                //var applications = (from application in Applications
-                //                    where application.RedirectUris!.Contains(address)
-                //                    select application).AsAsyncEnumerable(cancellationToken);
+                var tableClient = await Context.GetTableClientAsync(cancellationToken);
+                CloudTable ct = tableClient.GetTableReference(Options.CurrentValue.ApplicationsCollectionName);
 
-                //await foreach (var application in applications)
-                //{
-                //    var addresses = await GetRedirectUrisAsync(application, cancellationToken);
-                //    if (addresses.Contains(address, StringComparer.Ordinal))
-                //    {
-                //        yield return application;
-                //    }
-                //}
+                var query = ct.CreateQuery<TApplication>()
+                    .AsTableQuery();
 
-                //mongo
-                //var database = await Context.GetDatabaseAsync(cancellationToken);
-                //var collection = database.GetCollection<TApplication>(Options.CurrentValue.ApplicationsCollectionName);
+                var continuationToken = default(TableContinuationToken);
 
-                //await foreach (var application in collection.Find(application =>
-                //    application.RedirectUris.Contains(address)).ToAsyncEnumerable(cancellationToken))
-                //{
-                //    yield return application;
-                //}
+                do
+                {
+                    var results = await ct.ExecuteQuerySegmentedAsync(query, continuationToken, cancellationToken);
+                    continuationToken = results.ContinuationToken;
+
+                    var tempApplications = results.Where(a => a.RedirectUris!.Contains(address));
+
+                    foreach (var application in tempApplications)
+                    {
+                        var addresses = await GetRedirectUrisAsync(application, cancellationToken);
+                        if (addresses.Contains(address, StringComparer.Ordinal))
+                        {
+                            yield return application;
+                        }
+                    }
+                } while (continuationToken != null);
             }
         }
 
@@ -332,25 +295,15 @@ namespace OpenIddict.Ats
                 throw new ArgumentNullException(nameof(query));
             }
 
-            
-            var tableClient = GetCloudTableClient();
+            var tableClient = await Context.GetTableClientAsync(cancellationToken);
             CloudTable ct = tableClient.GetTableReference(Options.CurrentValue.ApplicationsCollectionName);
 
-            //TODO KAR .AsTableQuery().FirstOrDefaultAsync so how can I get it working here?
+            var cloudQuery = ct.CreateQuery<TApplication>().AsQueryable();
+            var result = query(cloudQuery, state);
 
-            return await ((TResult)query(ct.CreateQuery<TApplication>().AsQueryable(), state)).FirstOrDefaultAsync(cancellationToken);
-
-
-            //var test = ct.CreateQuery<TApplication>()
-            //    .AsTableQuery();
-
-            //return await test.FirstOrDefaultAsync(cancellationToken);
-
-            //mongo
-            //return await ((TResult) query(collection.AsQueryable(), state)).FirstOrDefaultAsync(cancellationToken);
-
-            //TODO KAR EF does:
-            //return await query(Applications, state).FirstOrDefaultAsync(cancellationToken);
+            //TODO KAR make async
+            //.AsTableQuery().FirstOrDefaultAsync so how can I get it working here?
+            return result.FirstOrDefault();//.FirstOrDefaultAsync(cancellationToken);
         }
 
         /// <inheritdoc/>
@@ -446,11 +399,7 @@ namespace OpenIddict.Ats
                 throw new ArgumentNullException(nameof(application));
             }
 
-            return new ValueTask<string?>(application.Id?.ToString()); //TODO KAR is this ok? Or add the Key stuff at top of the class in other file and add Convert method below as per EF?
-
-            //EF has:
-            //return new ValueTask<string?>(ConvertIdentifierToString(application.Id));
-
+            return new ValueTask<string?>(ConvertIdentifierToString(application.Id));
         }
 
         /// <inheritdoc/>
@@ -619,7 +568,7 @@ namespace OpenIddict.Ats
         public virtual async IAsyncEnumerable<TApplication> ListAsync(
             int? count, int? offset, [EnumeratorCancellation] CancellationToken cancellationToken)
         {
-            var tableClient = GetCloudTableClient();
+            var tableClient = await Context.GetTableClientAsync(cancellationToken);
             CloudTable ct = tableClient.GetTableReference(Options.CurrentValue.ApplicationsCollectionName);
 
             long counter = 0;
@@ -657,36 +606,29 @@ namespace OpenIddict.Ats
                 throw new ArgumentNullException(nameof(query));
             }
 
-            var tableClient = GetCloudTableClient();
-            CloudTable ct = tableClient.GetTableReference(Options.CurrentValue.ApplicationsCollectionName);
+            return ExecuteAsync(cancellationToken);
 
-            throw new NotImplementedException();
+            async IAsyncEnumerable<TResult> ExecuteAsync([EnumeratorCancellation] CancellationToken cancellationToken)
+            {
+                var tableClient = await Context.GetTableClientAsync(cancellationToken);
+                CloudTable ct = tableClient.GetTableReference(Options.CurrentValue.ApplicationsCollectionName);
 
-            //var query = new TableQuery<DynamicTableEntity>().Select(new[] { TableConstants.PartitionKey });
+                var tableQuery = ct.CreateQuery<TApplication>()
+                    .AsTableQuery();
 
-            //return await CountLongAsync(ct, query, cancellationToken);
+                var continuationToken = default(TableContinuationToken);
 
-            ///////////////
-            //mongo does
-            //return ExecuteAsync(cancellationToken);
+                do
+                {
+                    var results = await ct.ExecuteQuerySegmentedAsync(tableQuery, continuationToken, cancellationToken);
+                    continuationToken = results.ContinuationToken;
 
-            //async IAsyncEnumerable<TResult> ExecuteAsync([EnumeratorCancellation] CancellationToken cancellationToken)
-            //{
-            //    var database = await Context.GetDatabaseAsync(cancellationToken);
-            //    var collection = database.GetCollection<TApplication>(Options.CurrentValue.ApplicationsCollectionName);
-
-            //    await foreach (var element in query(collection.AsQueryable(), state).ToAsyncEnumerable(cancellationToken))
-            //    {
-            //        yield return element;
-            //    }
-            //}
-
-
-            /////////////////////////
-            //EF does this
-            //private DbSet<TApplication> Applications => Context.Set<TApplication>();
-
-            //return query(Applications, state).AsAsyncEnumerable(cancellationToken);
+                    foreach (var application in query(results.AsQueryable(), state))
+                    {
+                        yield return application;
+                    }
+                } while (continuationToken != null);
+            }
         }
 
         /// <inheritdoc/>
@@ -949,27 +891,7 @@ namespace OpenIddict.Ats
 
             return default;
         }
-        //mongo ver below, EF above
-        //public virtual ValueTask SetRedirectUrisAsync(TApplication application,
-        //    ImmutableArray<string> addresses, CancellationToken cancellationToken)
-        //{
-        //    if (application is null)
-        //    {
-        //        throw new ArgumentNullException(nameof(application));
-        //    }
-
-        //    if (addresses.IsDefaultOrEmpty)
-        //    {
-        //        application.RedirectUris = ImmutableList.Create<string>();
-
-        //        return default;
-        //    }
-
-        //    application.RedirectUris = addresses.ToImmutableList();
-
-        //    return default;
-        //}
-
+        
         /// <inheritdoc/>
         public virtual ValueTask SetRequirementsAsync(TApplication application, ImmutableArray<string> requirements, CancellationToken cancellationToken)
         {
@@ -1035,7 +957,7 @@ namespace OpenIddict.Ats
                 throw new ArgumentNullException(nameof(application));
             }
 
-            var tableClient = GetCloudTableClient();
+            var tableClient = await Context.GetTableClientAsync(cancellationToken);
             CloudTable ct = tableClient.GetTableReference(Options.CurrentValue.ApplicationsCollectionName);
 
             TableOperation insertOrMergeOperation = TableOperation.InsertOrMerge(application);
@@ -1048,6 +970,21 @@ namespace OpenIddict.Ats
             {
                 throw new OpenIddictExceptions.ConcurrencyException(SR.GetResourceString(SR.ID0239), exception);
             }
+        }
+
+        /// <summary>
+        /// Converts the provided identifier to its string representation.
+        /// </summary>
+        /// <param name="identifier">The identifier to convert.</param>
+        /// <returns>A <see cref="string"/> representation of the provided identifier.</returns>
+        public virtual string? ConvertIdentifierToString(string? identifier)
+        {
+            if (Equals(identifier, default(string)))
+            {
+                return null;
+            }
+
+            return TypeDescriptor.GetConverter(typeof(string)).ConvertToInvariantString(identifier);
         }
     }
 }

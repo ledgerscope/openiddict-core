@@ -164,6 +164,7 @@ namespace Microsoft.Extensions.DependencyInjection
         /// </summary>
         /// <param name="database">The <see cref="CloudTable"/>.</param>
         /// <returns>The <see cref="OpenIddictAtsBuilder"/>.</returns>
+        /// //TODO KAR
         public OpenIddictAtsBuilder UseDatabase(CloudTable database)
         {
             if (database is null)
@@ -171,7 +172,7 @@ namespace Microsoft.Extensions.DependencyInjection
                 throw new ArgumentNullException(nameof(database));
             }
 
-            return Configure(options => options.Database = database);
+            return Configure(options => options.Database = database.ServiceClient);
         }
 
         /// <inheritdoc/>

@@ -121,5 +121,16 @@ namespace Ats.Driver
             }
             while (continuationToken != null);
         }
+
+        public static string CombineFilters(string op, params string[] filters)
+        {
+            var f = filters.Where(a => a != null).ToArray();
+            string filter = f.First();
+            foreach (var item in f.Skip(1))
+            {
+                filter = TableQuery.CombineFilters(filter, op, item);
+            }
+            return filter;
+        }
     }
 }

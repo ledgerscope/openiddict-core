@@ -11,17 +11,17 @@ using Microsoft.WindowsAzure.Storage.Table;
 namespace OpenIddict.Ats
 {
     /// <summary>
-    /// Exposes the ATS database used by the OpenIddict stores.
+    /// Exposes the ATS table client used by the OpenIddict stores.
     /// </summary>
     public interface IOpenIddictAtsContext
     {
         /// <summary>
-        /// Gets the <see cref="CloudTable"/>.
+        /// Gets the <see cref="CloudTableClient"/>.
         /// </summary>
         /// <returns>
         /// A <see cref="ValueTask{TResult}"/> that can be used to monitor the
-        /// asynchronous operation, whose result returns the ATS database.
+        /// asynchronous operation, whose result returns the ATS table client.
         /// </returns>
-        ValueTask<CloudTable> GetDatabaseAsync(CancellationToken cancellationToken);
+        ValueTask<CloudTableClient> GetTableClientAsync(CancellationToken cancellationToken);
     }
 }

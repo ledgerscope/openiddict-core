@@ -42,8 +42,6 @@ namespace OpenIddict.Ats
         {
             Context = context;
             Options = options;
-
-            ConnectionString = "_applicationConfig.GetConnectionString(ConnectionStringKeys.Azure)"; //TODO KAR
         }
 
         /// <summary>
@@ -56,21 +54,6 @@ namespace OpenIddict.Ats
         /// </summary>
         protected IOptionsMonitor<OpenIddictAtsOptions> Options { get; }
 
-        public string ConnectionString { get; set; }
-
-        public CloudStorageAccount GetStorageAccount()
-        {
-            if (this.ConnectionString != null)
-            {
-                return CloudStorageAccount.Parse(this.ConnectionString);
-            }
-            else
-            {
-                string configConnString = "_applicationConfig.GetConnectionString(ConnectionStringKeys.Azure)"; //TODO KAR
-                return CloudStorageAccount.Parse(configConnString);
-            }
-        }
-
         public TableRequestOptions TableRequestOptions { get; } = new TableRequestOptions()
         {
             RetryPolicy = new ExponentialRetry(),
@@ -78,20 +61,10 @@ namespace OpenIddict.Ats
             ServerTimeout = TimeSpan.FromMinutes(1)
         };
 
-        public CloudTableClient GetCloudTableClient()
-        {
-            CloudStorageAccount account = GetStorageAccount();
-
-            var tableClient = account.CreateCloudTableClient();
-            tableClient.DefaultRequestOptions = TableRequestOptions;
-
-            return tableClient;
-        }
-
         /// <inheritdoc/>
         public virtual async ValueTask<long> CountAsync(CancellationToken cancellationToken)
         {
-            var tableClient = GetCloudTableClient();
+            var tableClient = await Context.GetTableClientAsync(cancellationToken);
             CloudTable ct = tableClient.GetTableReference(Options.CurrentValue.TokensCollectionName);
 
             var query = new TableQuery<DynamicTableEntity>().Select(new[] { TableConstants.PartitionKey });
@@ -108,12 +81,26 @@ namespace OpenIddict.Ats
                 throw new ArgumentNullException(nameof(query));
             }
 
-            throw new NotImplementedException(); //TODO KAR
+            var tableClient = await Context.GetTableClientAsync(cancellationToken);
+            CloudTable ct = tableClient.GetTableReference(Options.CurrentValue.ApplicationsCollectionName);
 
-            //var database = await Context.GetDatabaseAsync(cancellationToken);
-            //var collection = database.GetCollection<TToken>(Options.CurrentValue.TokensCollectionName);
+            var tableQuery = ct.CreateQuery<TToken>()
+                     .AsTableQuery();
 
-            //return await ((TToken) query(collection.AsQueryable())).LongCountAsync(cancellationToken);
+            long counter = 0;
+            var continuationToken = default(TableContinuationToken);
+
+            do
+            {
+                var results = await ct.ExecuteQuerySegmentedAsync(tableQuery, continuationToken, cancellationToken);
+                continuationToken = results.ContinuationToken;
+                foreach (var record in query(results.AsQueryable()))
+                {
+                    counter++;
+                }
+            } while (continuationToken != null);
+
+            return counter;
         }
 
         /// <inheritdoc/>
@@ -124,7 +111,7 @@ namespace OpenIddict.Ats
                 throw new ArgumentNullException(nameof(token));
             }
 
-            var tableClient = GetCloudTableClient();
+            var tableClient = await Context.GetTableClientAsync(cancellationToken);
             CloudTable ct = tableClient.GetTableReference(Options.CurrentValue.TokensCollectionName);
 
             TableOperation insertOrMergeOperation = TableOperation.InsertOrMerge(token);
@@ -140,7 +127,7 @@ namespace OpenIddict.Ats
                 throw new ArgumentNullException(nameof(token));
             }
 
-            var tableClient = GetCloudTableClient();
+            var tableClient = await Context.GetTableClientAsync(cancellationToken);
             CloudTable ct = tableClient.GetTableReference(Options.CurrentValue.TokensCollectionName);
 
             var idFilter = TableQuery.GenerateFilterCondition(nameof(OpenIddictAtsToken.Id), QueryComparisons.Equal, token.Id);
@@ -181,7 +168,7 @@ namespace OpenIddict.Ats
 
             async IAsyncEnumerable<TToken> ExecuteAsync([EnumeratorCancellation] CancellationToken cancellationToken)
             {
-                var tableClient = GetCloudTableClient();
+                var tableClient = await Context.GetTableClientAsync(cancellationToken);
                 CloudTable ct = tableClient.GetTableReference(Options.CurrentValue.TokensCollectionName);
 
                 var clientFilter = TableQuery.GenerateFilterCondition(nameof(OpenIddictAtsToken.ApplicationId), QueryComparisons.Equal, client);
@@ -235,20 +222,17 @@ namespace OpenIddict.Ats
 
             async IAsyncEnumerable<TToken> ExecuteAsync([EnumeratorCancellation] CancellationToken cancellationToken)
             {
-                var tableClient = GetCloudTableClient();
+                var tableClient = await Context.GetTableClientAsync(cancellationToken);
                 CloudTable ct = tableClient.GetTableReference(Options.CurrentValue.TokensCollectionName);
 
                 var clientFilter = TableQuery.GenerateFilterCondition(nameof(OpenIddictAtsToken.ApplicationId), QueryComparisons.Equal, client);
                 var subjectFilter = TableQuery.GenerateFilterCondition(nameof(OpenIddictAtsToken.Subject), QueryComparisons.Equal, subject);
                 var statusFilter = TableQuery.GenerateFilterCondition(nameof(OpenIddictAtsToken.Status), QueryComparisons.Equal, status);
-
-                var filter = TableQuery.CombineFilters(clientFilter,
-                    TableOperators.And,
-                    subjectFilter);
-                //TODO KAR how to add status filter to where clause?
+                                
+                var filters = OpenIddictAtsHelpers.CombineFilters(TableOperators.And, new string[] { subjectFilter, clientFilter, statusFilter });
 
                 var query = ct.CreateQuery<TToken>()
-                    .Where(filter)
+                    .Where(filters)
                     .AsTableQuery();
 
                 var continuationToken = default(TableContinuationToken);
@@ -296,7 +280,7 @@ namespace OpenIddict.Ats
 
             async IAsyncEnumerable<TToken> ExecuteAsync([EnumeratorCancellation] CancellationToken cancellationToken)
             {
-                var tableClient = GetCloudTableClient();
+                var tableClient = await Context.GetTableClientAsync(cancellationToken);
                 CloudTable ct = tableClient.GetTableReference(Options.CurrentValue.TokensCollectionName);
 
                 var clientFilter = TableQuery.GenerateFilterCondition(nameof(OpenIddictAtsToken.ApplicationId), QueryComparisons.Equal, client);
@@ -304,13 +288,10 @@ namespace OpenIddict.Ats
                 var statusFilter = TableQuery.GenerateFilterCondition(nameof(OpenIddictAtsToken.Status), QueryComparisons.Equal, status);
                 var typeFilter = TableQuery.GenerateFilterCondition(nameof(OpenIddictAtsToken.Type), QueryComparisons.Equal, type);
 
-                var filter = TableQuery.CombineFilters(clientFilter,
-                    TableOperators.And,
-                    subjectFilter);
-                //TODO KAR how to add status and type filter to where clause?
+                var filters = OpenIddictAtsHelpers.CombineFilters(TableOperators.And, new string[] { subjectFilter, clientFilter, statusFilter, typeFilter });
 
                 var query = ct.CreateQuery<TToken>()
-                    .Where(filter)
+                    .Where(filters)
                     .AsTableQuery();
 
                 var continuationToken = default(TableContinuationToken);
@@ -341,7 +322,7 @@ namespace OpenIddict.Ats
 
             async IAsyncEnumerable<TToken> ExecuteAsync([EnumeratorCancellation] CancellationToken cancellationToken)
             {
-                var tableClient = GetCloudTableClient();
+                var tableClient = await Context.GetTableClientAsync(cancellationToken);
                 CloudTable ct = tableClient.GetTableReference(Options.CurrentValue.TokensCollectionName);
 
                 var query = ct.CreateQuery<TToken>()
@@ -376,7 +357,7 @@ namespace OpenIddict.Ats
 
             async IAsyncEnumerable<TToken> ExecuteAsync([EnumeratorCancellation] CancellationToken cancellationToken)
             {
-                var tableClient = GetCloudTableClient();
+                var tableClient = await Context.GetTableClientAsync(cancellationToken);
                 CloudTable ct = tableClient.GetTableReference(Options.CurrentValue.TokensCollectionName);
 
                 var query = ct.CreateQuery<TToken>()
@@ -407,7 +388,7 @@ namespace OpenIddict.Ats
                 throw new ArgumentException(SR.GetResourceString(SR.ID0195), nameof(identifier));
             }
 
-            var tableClient = GetCloudTableClient();
+            var tableClient = await Context.GetTableClientAsync(cancellationToken);
             CloudTable ct = tableClient.GetTableReference(Options.CurrentValue.TokensCollectionName);
 
             var query = ct.CreateQuery<TToken>()
@@ -426,7 +407,7 @@ namespace OpenIddict.Ats
                 throw new ArgumentException(SR.GetResourceString(SR.ID0195), nameof(identifier));
             }
 
-            var tableClient = GetCloudTableClient();
+            var tableClient = await Context.GetTableClientAsync(cancellationToken);
             CloudTable ct = tableClient.GetTableReference(Options.CurrentValue.TokensCollectionName);
 
             var query = ct.CreateQuery<TToken>()
@@ -449,7 +430,7 @@ namespace OpenIddict.Ats
 
             async IAsyncEnumerable<TToken> ExecuteAsync([EnumeratorCancellation] CancellationToken cancellationToken)
             {
-                var tableClient = GetCloudTableClient();
+                var tableClient = await Context.GetTableClientAsync(cancellationToken);
                 CloudTable ct = tableClient.GetTableReference(Options.CurrentValue.TokensCollectionName);
 
                 var query = ct.CreateQuery<TToken>()
@@ -480,26 +461,6 @@ namespace OpenIddict.Ats
                 throw new ArgumentNullException(nameof(token));
             }
 
-            //TODO KAR is this ok?
-            //EF had
-            //if (token.Application is null)
-            //{
-            //    var reference = Context.Entry(token).Reference(entry => entry.Application);
-            //    if (reference.EntityEntry.State == EntityState.Detached)
-            //    {
-            //        return null;
-            //    }
-
-            //    await reference.LoadAsync(cancellationToken);
-            //}
-
-            //if (token.Application is null)
-            //{
-            //    return null;
-            //}
-
-            //return ConvertIdentifierToString(token.Application.Id);
-
             if (token.ApplicationId == null)
             {
                 return new ValueTask<string?>(result: null);
@@ -517,11 +478,16 @@ namespace OpenIddict.Ats
             {
                 throw new ArgumentNullException(nameof(query));
             }
-            //TODO KAR
-            //var database = await Context.GetDatabaseAsync(cancellationToken);
-            //var collection = database.GetCollection<TToken>(Options.CurrentValue.TokensCollectionName);
 
-            //return await ((TResult) query(collection.AsQueryable(), state)).FirstOrDefaultAsync(cancellationToken);
+            var tableClient = await Context.GetTableClientAsync(cancellationToken);
+            CloudTable ct = tableClient.GetTableReference(Options.CurrentValue.AuthorizationsCollectionName);
+
+            var cloudQuery = ct.CreateQuery<TToken>().AsQueryable();
+            var result = query(cloudQuery, state);
+
+            //TODO KAR make async
+            //.AsTableQuery().FirstOrDefaultAsync so how can I get it working here?
+            return result.FirstOrDefault();//.FirstOrDefaultAsync(cancellationToken);
         }
 
         /// <inheritdoc/>
@@ -531,7 +497,7 @@ namespace OpenIddict.Ats
             {
                 throw new ArgumentNullException(nameof(token));
             }
-            //TODO KAR is this ok? see method above for similar
+            
             if (token.AuthorizationId == null)
             {
                 return new ValueTask<string?>(result: null);
@@ -697,7 +663,7 @@ namespace OpenIddict.Ats
         public virtual async IAsyncEnumerable<TToken> ListAsync(
             int? count, int? offset, [EnumeratorCancellation] CancellationToken cancellationToken)
         {
-            var tableClient = GetCloudTableClient();
+            var tableClient = await Context.GetTableClientAsync(cancellationToken);
             CloudTable ct = tableClient.GetTableReference(Options.CurrentValue.TokensCollectionName);
 
             long counter = 0;
@@ -739,73 +705,68 @@ namespace OpenIddict.Ats
 
             async IAsyncEnumerable<TResult> ExecuteAsync([EnumeratorCancellation] CancellationToken cancellationToken)
             {
-                //TODO KAR
-                //var database = await Context.GetDatabaseAsync(cancellationToken);
-                //var collection = database.GetCollection<TToken>(Options.CurrentValue.TokensCollectionName);
+                var tableClient = await Context.GetTableClientAsync(cancellationToken);
+                CloudTable ct = tableClient.GetTableReference(Options.CurrentValue.TokensCollectionName);
 
-                //await foreach (var element in query(collection.AsQueryable(), state).ToAsyncEnumerable(cancellationToken))
-                //{
-                //    yield return element;
-                //}
+                var tableQuery = ct.CreateQuery<TToken>()
+                    .AsTableQuery();
+
+                var continuationToken = default(TableContinuationToken);
+
+                do
+                {
+                    var results = await ct.ExecuteQuerySegmentedAsync(tableQuery, continuationToken, cancellationToken);
+                    continuationToken = results.ContinuationToken;
+
+                    foreach (var token in query(results.AsQueryable(), state))
+                    {
+                        yield return token;
+                    }
+                } while (continuationToken != null);
             }
         }
 
         /// <inheritdoc/>
         public virtual async ValueTask PruneAsync(DateTimeOffset threshold, CancellationToken cancellationToken)
         {
-            //TODO KAR
-            var database = await Context.GetDatabaseAsync(cancellationToken);
-            var collection = database.GetCollection<TToken>(Options.CurrentValue.TokensCollectionName);
+            var tableClient = await Context.GetTableClientAsync(cancellationToken);
+            CloudTable ctToken = tableClient.GetTableReference(Options.CurrentValue.TokensCollectionName);
+            CloudTable ctAuth = tableClient.GetTableReference(Options.CurrentValue.AuthorizationsCollectionName);
 
-            // Note: directly deleting the resulting set of an aggregate query is not supported by MongoDB. //TODO KAR need this code?
-            // To work around this limitation, the token identifiers are stored in an intermediate list
-            // and delete requests are sent to remove the documents corresponding to these identifiers.
+            var tokenQuery = ctToken.CreateQuery<TToken>()
+                    .AsTableQuery();
+
+            var authQuery = ctAuth.CreateQuery<OpenIddictAtsAuthorization>()
+                    .AsTableQuery();
 
             var identifiers =
-                await (from token in collection.AsQueryable()
-                       join authorization in database.GetCollection<OpenIddictAtsAuthorization>(Options.CurrentValue.AuthorizationsCollectionName).AsQueryable()
-                                          on token.AuthorizationId equals authorization.Id into authorizations
-                       where token.CreationDate < threshold.UtcDateTime
-                       where (token.Status != Statuses.Inactive && token.Status != Statuses.Valid) ||
+                (from token in tokenQuery
+                 join authorization in authQuery
+                            on token.AuthorizationId equals authorization.Id into authorizations
+                 where token.CreationDate < threshold.UtcDateTime
+                 where (token.Status != Statuses.Inactive && token.Status != Statuses.Valid) ||
                               token.ExpirationDate < DateTime.UtcNow ||
                               authorizations.Any(authorization => authorization.Status != Statuses.Valid)
-                       select token.Id).ToListAsync(cancellationToken);
+                 select token).ToList();
 
-            // Note: to avoid generating delete requests with very large filters, a buffer is used here and the
-            // maximum number of elements that can be removed by a single call to PruneAsync() is limited to 50000.
-            foreach (var buffer in Buffer(identifiers.Take(50_000), 1_000))
+            var offset = 0;
+            while (offset < identifiers.Count)
             {
-                await collection.DeleteManyAsync(token => buffer.Contains(token.Id), cancellationToken);
-            }
-
-            static IEnumerable<List<TSource>> Buffer<TSource>(IEnumerable<TSource> source, int count)
-            {
-                List<TSource>? buffer = null;
-
-                foreach (var element in source)
+                var batch = new TableBatchOperation();
+                var rows = identifiers.Skip(offset).Take(100).ToList();
+                foreach (var row in rows)
                 {
-                    buffer ??= new List<TSource>(capacity: 1);
-                    buffer.Add(element);
-
-                    if (buffer.Count == count)
-                    {
-                        yield return buffer;
-
-                        buffer = null;
-                    }
+                    batch.Delete(row);
                 }
 
-                if (buffer is not null)
-                {
-                    yield return buffer;
-                }
+                ctAuth.ExecuteBatch(batch);
+                offset += rows.Count;
             }
         }
 
         /// <inheritdoc/>
         public virtual ValueTask SetApplicationIdAsync(TToken token, string? identifier, CancellationToken cancellationToken)
         {
-            //TODO KAR do in AuthorizationStore then copy here
             if (token is null)
             {
                 throw new ArgumentNullException(nameof(token));
@@ -813,12 +774,11 @@ namespace OpenIddict.Ats
 
             if (!string.IsNullOrEmpty(identifier))
             {
-                token.ApplicationId = ObjectId.Parse(identifier);
+                token.ApplicationId = identifier;
             }
-
             else
             {
-                token.ApplicationId = ObjectId.Empty;
+                token.ApplicationId = null;
             }
 
             return default;
@@ -827,7 +787,6 @@ namespace OpenIddict.Ats
         /// <inheritdoc/>
         public virtual ValueTask SetAuthorizationIdAsync(TToken token, string? identifier, CancellationToken cancellationToken)
         {
-            //TODO KAR do in AuthorizationStore then copy here
             if (token is null)
             {
                 throw new ArgumentNullException(nameof(token));
@@ -835,12 +794,11 @@ namespace OpenIddict.Ats
 
             if (!string.IsNullOrEmpty(identifier))
             {
-                token.AuthorizationId = ObjectId.Parse(identifier);
+                token.AuthorizationId = identifier;
             }
-
             else
             {
-                token.AuthorizationId = ObjectId.Empty;
+                token.AuthorizationId = null;
             }
 
             return default;
@@ -997,7 +955,7 @@ namespace OpenIddict.Ats
                 throw new ArgumentNullException(nameof(token));
             }
 
-            var tableClient = GetCloudTableClient();
+            var tableClient = await Context.GetTableClientAsync(cancellationToken);
             CloudTable ct = tableClient.GetTableReference(Options.CurrentValue.TokensCollectionName);
 
             TableOperation insertOrMergeOperation = TableOperation.InsertOrMerge(token);
