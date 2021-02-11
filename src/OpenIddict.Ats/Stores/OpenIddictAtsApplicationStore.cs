@@ -17,13 +17,10 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Options;
-using Microsoft.WindowsAzure.Storage;
-using Microsoft.WindowsAzure.Storage.RetryPolicies;
-using Microsoft.WindowsAzure.Storage.Table;
-using Microsoft.WindowsAzure.Storage.Table.Protocol;
+using Microsoft.Azure.Cosmos.Table;
+using Microsoft.Azure.Cosmos.Table.Protocol;
 using OpenIddict.Abstractions;
 using OpenIddict.Ats.Models;
-using Microsoft.WindowsAzure.Storage.Table.Queryable;
 using SR = OpenIddict.Abstractions.OpenIddictResources;
 using Ats.Driver;
 using System.ComponentModel;
@@ -85,8 +82,7 @@ namespace OpenIddict.Ats
             var tableClient = await Context.GetTableClientAsync(cancellationToken);
             CloudTable ct = tableClient.GetTableReference(Options.CurrentValue.ApplicationsCollectionName);
 
-            var tableQuery = ct.CreateQuery<TApplication>()
-                     .AsTableQuery();
+            var tableQuery = ct.CreateQuery<TApplication>();
 
             long counter = 0;
             var continuationToken = default(TableContinuationToken);
@@ -180,10 +176,11 @@ namespace OpenIddict.Ats
 
             var query = ct.CreateQuery<TApplication>()
                 .Take(1)
-                .Where(TableQuery.GenerateFilterCondition(nameof(OpenIddictAtsApplication.Id), QueryComparisons.Equal, identifier))
-                .AsTableQuery();
+                .Where(TableQuery.GenerateFilterCondition(nameof(OpenIddictAtsApplication.Id), QueryComparisons.Equal, identifier));
 
-            return await query.FirstOrDefaultAsync(cancellationToken);
+            var queryResult = await query.ExecuteSegmentedAsync(default, cancellationToken);
+
+            return queryResult.Results.FirstOrDefault();
         }
 
         /// <inheritdoc/>
@@ -199,10 +196,11 @@ namespace OpenIddict.Ats
 
             var query = ct.CreateQuery<TApplication>()
                 .Take(1)
-                .Where(TableQuery.GenerateFilterCondition(nameof(OpenIddictAtsApplication.ClientId), QueryComparisons.Equal, identifier))
-                .AsTableQuery();
+                .Where(TableQuery.GenerateFilterCondition(nameof(OpenIddictAtsApplication.ClientId), QueryComparisons.Equal, identifier));
 
-            return await query.FirstOrDefaultAsync(cancellationToken);
+            var queryResult = await query.ExecuteSegmentedAsync(default, cancellationToken);
+
+            return queryResult.Results.FirstOrDefault();
         }
 
         /// <inheritdoc/>
@@ -221,8 +219,7 @@ namespace OpenIddict.Ats
                 var tableClient = await Context.GetTableClientAsync(cancellationToken);
                 CloudTable ct = tableClient.GetTableReference(Options.CurrentValue.ApplicationsCollectionName);
 
-                var query = ct.CreateQuery<TApplication>()
-                    .AsTableQuery();
+                var query = ct.CreateQuery<TApplication>();
 
                 var continuationToken = default(TableContinuationToken);
 
@@ -261,8 +258,7 @@ namespace OpenIddict.Ats
                 var tableClient = await Context.GetTableClientAsync(cancellationToken);
                 CloudTable ct = tableClient.GetTableReference(Options.CurrentValue.ApplicationsCollectionName);
 
-                var query = ct.CreateQuery<TApplication>()
-                    .AsTableQuery();
+                var query = ct.CreateQuery<TApplication>();
 
                 var continuationToken = default(TableContinuationToken);
 
@@ -613,8 +609,7 @@ namespace OpenIddict.Ats
                 var tableClient = await Context.GetTableClientAsync(cancellationToken);
                 CloudTable ct = tableClient.GetTableReference(Options.CurrentValue.ApplicationsCollectionName);
 
-                var tableQuery = ct.CreateQuery<TApplication>()
-                    .AsTableQuery();
+                var tableQuery = ct.CreateQuery<TApplication>();
 
                 var continuationToken = default(TableContinuationToken);
 

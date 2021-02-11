@@ -10,7 +10,7 @@ using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
-using Microsoft.WindowsAzure.Storage.Table;
+using Microsoft.Azure.Cosmos.Table;
 using System.Collections.Immutable;
 using System.Globalization;
 using System.IO;
@@ -18,12 +18,9 @@ using System.Text;
 using System.Text.Encodings.Web;
 using System.Text.Json;
 using Microsoft.Extensions.Options;
-using Microsoft.WindowsAzure.Storage;
-using Microsoft.WindowsAzure.Storage.RetryPolicies;
-using Microsoft.WindowsAzure.Storage.Table.Protocol;
+using Microsoft.Azure.Cosmos.Table.Protocol;
 using OpenIddict.Abstractions;
 using OpenIddict.Ats.Models;
-using Microsoft.WindowsAzure.Storage.Table.Queryable;
 
 namespace Ats.Driver
 {
@@ -32,48 +29,48 @@ namespace Ats.Driver
     /// </summary>
     internal static class OpenIddictAtsHelpers
     {
-        public static async Task<IEnumerable<TElement>> ExecuteAsync<TElement>(this TableQuery<TElement> tableQuery, CancellationToken ct)
-        {
-            var nextQuery = tableQuery;
-            var continuationToken = default(TableContinuationToken);
-            var results = new List<TElement>();
+        //public static async Task<IEnumerable<TElement>> ExecuteAsync<TElement>(this TableQuery<TElement> tableQuery, CancellationToken ct)
+        //{
+        //    var nextQuery = tableQuery;
+        //    var continuationToken = default(TableContinuationToken);
+        //    var results = new List<TElement>();
 
-            do
-            {
-                //Execute the next query segment async.
-                var queryResult = await nextQuery.ExecuteSegmentedAsync(continuationToken, ct);
+        //    do
+        //    {
+        //        //Execute the next query segment async.
+        //        var queryResult = await nextQuery.ExecuteSegmentedAsync(continuationToken, ct);
 
-                //Set exact results list capacity with result count.
-                results.Capacity += queryResult.Results.Count;
+        //        //Set exact results list capacity with result count.
+        //        results.Capacity += queryResult.Results.Count;
 
-                //Add segment results to results list.
-                results.AddRange(queryResult.Results);
+        //        //Add segment results to results list.
+        //        results.AddRange(queryResult.Results);
 
-                continuationToken = queryResult.ContinuationToken;
+        //        continuationToken = queryResult.ContinuationToken;
 
-                //Continuation token is not null, more records to load.
-                if (continuationToken != null && tableQuery.TakeCount.HasValue)
-                {
-                    //Query has a take count, calculate the remaining number of items to load.
-                    var itemsToLoad = tableQuery.TakeCount.Value - results.Count;
+        //        //Continuation token is not null, more records to load.
+        //        if (continuationToken != null && tableQuery.TakeCount.HasValue)
+        //        {
+        //            //Query has a take count, calculate the remaining number of items to load.
+        //            var itemsToLoad = tableQuery.TakeCount.Value - results.Count;
 
-                    //If more items to load, update query take count, or else set next query to null.
-                    nextQuery = itemsToLoad > 0
-                        ? tableQuery.Take<TElement>(itemsToLoad).AsTableQuery()
-                        : null;
-                }
+        //            //If more items to load, update query take count, or else set next query to null.
+        //            nextQuery = itemsToLoad > 0
+        //                ? tableQuery.Take<TElement>(itemsToLoad).AsTableQuery()
+        //                : null;
+        //        }
 
-            } while (continuationToken != null && nextQuery != null && !ct.IsCancellationRequested);
+        //    } while (continuationToken != null && nextQuery != null && !ct.IsCancellationRequested);
 
-            return results;
-        }
+        //    return results;
+        //}
 
-        public static async Task<TElement> FirstOrDefaultAsync<TElement>(this TableQuery<TElement> tableQuery, CancellationToken ct)
-        {
-            var queryResult = await tableQuery.ExecuteSegmentedAsync(default, ct);
+        //public static async Task<TElement> FirstOrDefaultAsync<TElement>(this TableQuery<TElement> tableQuery, CancellationToken ct)
+        //{
+        //    var queryResult = await tableQuery.ExecuteSegmentedAsync(default, ct);
 
-            return queryResult.Results.FirstOrDefault();
-        }
+        //    return queryResult.Results.FirstOrDefault();
+        //}
 
         public static async ValueTask<long> CountLongAsync(CloudTable ct, TableQuery<DynamicTableEntity> query, CancellationToken cancellationToken)
         {

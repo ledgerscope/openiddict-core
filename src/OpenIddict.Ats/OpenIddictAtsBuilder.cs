@@ -10,7 +10,7 @@ using OpenIddict.Core;
 using OpenIddict.Ats;
 using OpenIddict.Ats.Models;
 using SR = OpenIddict.Abstractions.OpenIddictResources;
-using Microsoft.WindowsAzure.Storage.Table;
+using Microsoft.Azure.Cosmos.Table;
 
 namespace Microsoft.Extensions.DependencyInjection
 {
