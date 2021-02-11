@@ -92,3 +92,11 @@ jobs:
     - name: Push NuGet packages to NuGet.org
       if: ${{ github.repository_owner == 'openiddict' && startsWith(github.ref, 'refs/tags/') && runner.os == 'Windows' }}
       run: dotnet nuget push "artifacts\packages\Release\Shipping\*.nupkg" --api-key ${{ secrets.NUGET_API_KEY }} --skip-duplicate --source https://api.nuget.org/v3/index.json
+
+    - name: Setup NuGet
+      if: ${{ github.repository_owner == 'ledgerscope' && (github.ref == 'refs/heads/dev' || startsWith(github.ref, 'refs/heads/rel/') || startsWith(github.ref, 'refs/tags/')) && runner.os == 'Windows' }}
+      run: dotnet nuget add source "https://pkgs.dev.azure.com/ledgerscope/_packaging/LSFeed/nuget/v3/index.json" --name LSFeed -u ledgerscope --password ${{ secrets.LEDGERSCOPEDEVOPS }} --store-password-in-clear-text
+
+    - name: Publish
+      if: ${{ github.repository_owner == 'ledgerscope' && (github.ref == 'refs/heads/dev' || startsWith(github.ref, 'refs/heads/rel/') || startsWith(github.ref, 'refs/tags/')) && runner.os == 'Windows' }}
+      run: dotnet nuget push -s LSFeed --api-key az "artifacts\packages\Release\Shipping\*.nupkg"
