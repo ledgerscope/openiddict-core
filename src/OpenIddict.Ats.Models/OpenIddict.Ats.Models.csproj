@@ -15,13 +15,4 @@
     <PackageReference Include="Microsoft.Azure.Cosmos.Table" Version="1.0.8" />
   </ItemGroup>
 
-  <ItemGroup>
-    <Reference Include="System.Collections.Immutable">
-      <HintPath>..\..\artifacts\obj\Mvc.Server\Debug\net5.0\annotated\System.Collections.Immutable.dll</HintPath>
-    </Reference>
-    <Reference Include="System.Text.Json">
-      <HintPath>..\..\artifacts\obj\Mvc.Server\Debug\net5.0\annotated\System.Text.Json.dll</HintPath>
-    </Reference>
-  </ItemGroup>
-
 </Project>
