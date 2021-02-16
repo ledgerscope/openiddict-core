@@ -11,6 +11,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using Microsoft.Azure.Cosmos.Table;
 using SR = OpenIddict.Abstractions.OpenIddictResources;
+using OpenIddict.Ats.Models;
 
 namespace OpenIddict.Ats
 {
@@ -29,11 +30,11 @@ namespace OpenIddict.Ats
         }
 
         /// <inheritdoc/>
-        public ValueTask<CloudTableClient> GetTableClientAsync(CancellationToken cancellationToken)
+        public ValueTask<ICloudTableClient> GetTableClientAsync(CancellationToken cancellationToken)
         {
             if (cancellationToken.IsCancellationRequested)
             {
-                return new ValueTask<CloudTableClient>(Task.FromCanceled<CloudTableClient>(cancellationToken));
+                return new ValueTask<ICloudTableClient>(Task.FromCanceled<ICloudTableClient>(cancellationToken));
             }
 
             //TODO KAR
@@ -47,18 +48,16 @@ namespace OpenIddict.Ats
             var database = _options.CurrentValue.Database;
             if (database is null)
             {
-                database = _provider.GetService<CloudTableClient>();
-                //line above would call this in main app?
-                //services.AddSingleton(new MongoClient("mongodb://localhost:27017").GetDatabase("openiddict"));
+                database = _provider.GetService<ICloudTableClient>();
             }
 
             if (database is null)
             {
-                return new ValueTask<CloudTableClient>(Task.FromException<CloudTableClient>(
+                return new ValueTask<ICloudTableClient>(Task.FromException<ICloudTableClient>(
                     new InvalidOperationException(SR.GetResourceString(SR.ID0262))));
             }
 
-            return new ValueTask<CloudTableClient>(database);
+            return new ValueTask<ICloudTableClient>(database);
         }
 
         //public CloudStorageAccount GetStorageAccount()

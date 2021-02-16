@@ -115,6 +115,8 @@ Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "OpenIddict.Ats", "src\OpenI
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "OpenIddict.Ats.Models", "src\OpenIddict.Ats.Models\OpenIddict.Ats.Models.csproj", "{257BCCAE-E84D-4C62-BF83-8EADFE1C01FA}"
 EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "OpenIddict.Ats.Tests", "test\OpenIddict.Ats.Tests\OpenIddict.Ats.Tests.csproj", "{9988638A-2027-4693-AD3F-7B2CE57AEAE7}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -269,6 +271,10 @@ Global
 		{257BCCAE-E84D-4C62-BF83-8EADFE1C01FA}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{257BCCAE-E84D-4C62-BF83-8EADFE1C01FA}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{257BCCAE-E84D-4C62-BF83-8EADFE1C01FA}.Release|Any CPU.Build.0 = Release|Any CPU
+		{9988638A-2027-4693-AD3F-7B2CE57AEAE7}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{9988638A-2027-4693-AD3F-7B2CE57AEAE7}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{9988638A-2027-4693-AD3F-7B2CE57AEAE7}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{9988638A-2027-4693-AD3F-7B2CE57AEAE7}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -311,6 +317,7 @@ Global
 		{01420929-33B8-4B60-A618-8C8B5F139630} = {5FC71D6A-A994-4F62-977F-88A7D25379D7}
 		{5BAD4054-20E7-49A4-AA95-2E5EF3E9D8E2} = {D544447C-D701-46BB-9A5B-C76C612A596B}
 		{257BCCAE-E84D-4C62-BF83-8EADFE1C01FA} = {D544447C-D701-46BB-9A5B-C76C612A596B}
+		{9988638A-2027-4693-AD3F-7B2CE57AEAE7} = {5FC71D6A-A994-4F62-977F-88A7D25379D7}
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {A710059F-0466-4D48-9B3A-0EF4F840B616}

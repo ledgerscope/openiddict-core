@@ -159,19 +159,19 @@ namespace Microsoft.Extensions.DependencyInjection
         }
 
         /// <summary>
-        /// Configures ATS to use the specified database
+        /// Configures Ats to use the specified database
         /// instead of retrieving it from the dependency injection container.
         /// </summary>
-        /// <param name="database">The <see cref="CloudTableClient"/>.</param>
+        /// <param name="cloudTableClient">The <see cref="ICloudTableClient"/>.</param>
         /// <returns>The <see cref="OpenIddictAtsBuilder"/>.</returns>
-        public OpenIddictAtsBuilder UseDatabase(CloudTableClient database)
+        public OpenIddictAtsBuilder UseAts(ICloudTableClient cloudTableClient)
         {
-            if (database is null)
+            if (cloudTableClient is null)
             {
-                throw new ArgumentNullException(nameof(database));
+                throw new ArgumentNullException(nameof(cloudTableClient));
             }
 
-            return Configure(options => options.Database = database);
+            return Configure(options => options.Database = cloudTableClient);
         }
 
         /// <inheritdoc/>

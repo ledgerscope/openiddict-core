@@ -195,11 +195,10 @@ namespace OpenIddict.Ats
             CloudTable ct = tableClient.GetTableReference(Options.CurrentValue.ApplicationsCollectionName);
 
             var query = ct.CreateQuery<TApplication>()
-                .Take(1)
                 .Where(TableQuery.GenerateFilterCondition(nameof(OpenIddictAtsApplication.ClientId), QueryComparisons.Equal, identifier));
 
             var queryResult = await query.ExecuteSegmentedAsync(default, cancellationToken);
-
+            
             return queryResult.Results.FirstOrDefault();
         }
 

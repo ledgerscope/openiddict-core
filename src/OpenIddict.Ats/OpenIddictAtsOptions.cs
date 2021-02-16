@@ -6,6 +6,7 @@
 
 using Ats.Driver;
 using Microsoft.Azure.Cosmos.Table;
+using OpenIddict.Ats.Models;
 
 namespace OpenIddict.Ats
 {
@@ -25,10 +26,10 @@ namespace OpenIddict.Ats
         public string AuthorizationsCollectionName { get; set; } = "openiddict.authorizations";
 
         /// <summary>
-        /// Gets or sets the <see cref="CloudTableClient"/> used by the OpenIddict stores.
+        /// Gets or sets the <see cref="ICloudTableClient"/> used by the OpenIddict stores.
         /// If no value is explicitly set, the database is resolved from the DI container.
         /// </summary>
-        public CloudTableClient? Database { get; set; }
+        public ICloudTableClient? Database { get; set; }
 
         /// <summary>
         /// Gets or sets the name of the scopes collection (by default, openiddict.scopes).

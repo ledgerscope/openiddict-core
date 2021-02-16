@@ -7,6 +7,7 @@
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Azure.Cosmos.Table;
+using OpenIddict.Ats.Models;
 
 namespace OpenIddict.Ats
 {
@@ -16,12 +17,12 @@ namespace OpenIddict.Ats
     public interface IOpenIddictAtsContext
     {
         /// <summary>
-        /// Gets the <see cref="CloudTableClient"/>.
+        /// Gets the <see cref="ICloudTableClient"/>.
         /// </summary>
         /// <returns>
         /// A <see cref="ValueTask{TResult}"/> that can be used to monitor the
         /// asynchronous operation, whose result returns the ATS table client.
         /// </returns>
-        ValueTask<CloudTableClient> GetTableClientAsync(CancellationToken cancellationToken);
+        ValueTask<ICloudTableClient> GetTableClientAsync(CancellationToken cancellationToken);
     }
 }
