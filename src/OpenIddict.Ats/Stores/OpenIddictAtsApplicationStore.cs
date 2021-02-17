@@ -194,12 +194,20 @@ namespace OpenIddict.Ats
             var tableClient = await Context.GetTableClientAsync(cancellationToken);
             CloudTable ct = tableClient.GetTableReference(Options.CurrentValue.ApplicationsCollectionName);
 
-            var query = ct.CreateQuery<TApplication>()
-                .Where(TableQuery.GenerateFilterCondition(nameof(OpenIddictAtsApplication.ClientId), QueryComparisons.Equal, identifier));
+            var condition = TableQuery.GenerateFilterCondition(nameof(OpenIddictAtsApplication.ClientId), QueryComparisons.Equal, identifier);
 
-            var queryResult = await query.ExecuteSegmentedAsync(default, cancellationToken);
-            
+            var query = new TableQuery<TApplication>().Where(condition);
+
+            var queryResult = await ct.ExecuteQuerySegmentedAsync(query, default, cancellationToken);
+
             return queryResult.Results.FirstOrDefault();
+
+            //var query = ct.CreateQuery<TApplication>()
+            //    .Where(TableQuery.GenerateFilterCondition(nameof(OpenIddictAtsApplication.ClientId), QueryComparisons.Equal, identifier));
+
+            //var queryResult = await query.ExecuteSegmentedAsync(default, cancellationToken);
+
+            //return queryResult.Results.FirstOrDefault();
         }
 
         /// <inheritdoc/>
