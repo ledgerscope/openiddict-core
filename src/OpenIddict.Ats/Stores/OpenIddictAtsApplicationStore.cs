@@ -131,7 +131,7 @@ namespace OpenIddict.Ats
             var tableClient = await Context.GetTableClientAsync(cancellationToken);
             CloudTable ct = tableClient.GetTableReference(Options.CurrentValue.ApplicationsCollectionName);
 
-            var idFilter = TableQuery.GenerateFilterCondition(nameof(OpenIddictAtsApplication.Id), QueryComparisons.Equal, application.Id);
+            var idFilter = TableQuery.GenerateFilterCondition(nameof(OpenIddictAtsApplication.PartitionKey), QueryComparisons.Equal, application.PartitionKey);
             var tokenFilter = TableQuery.GenerateFilterCondition(nameof(OpenIddictAtsApplication.ConcurrencyToken), QueryComparisons.Equal, application.ConcurrencyToken);
 
             var filter = TableQuery.CombineFilters(idFilter,
@@ -148,7 +148,7 @@ namespace OpenIddict.Ats
                 // Delete the authorizations associated with the application.
                 ct = tableClient.GetTableReference(Options.CurrentValue.AuthorizationsCollectionName);
 
-                var authDeleteQuery = new TableQuery<OpenIddictAtsAuthorization>().Where(TableQuery.GenerateFilterCondition(nameof(OpenIddictAtsAuthorization.ApplicationId), QueryComparisons.Equal, application.Id))
+                var authDeleteQuery = new TableQuery<OpenIddictAtsAuthorization>().Where(TableQuery.GenerateFilterCondition(nameof(OpenIddictAtsAuthorization.ApplicationId), QueryComparisons.Equal, application.PartitionKey))
                     .Select(new string[] { TableConstants.PartitionKey, TableConstants.RowKey });
 
                 await OpenIddictAtsHelpers.DeleteAsync(ct, authDeleteQuery);
@@ -156,7 +156,7 @@ namespace OpenIddict.Ats
                 // Delete the tokens associated with the application.
                 ct = tableClient.GetTableReference(Options.CurrentValue.TokensCollectionName);
 
-                var tokenDeleteQuery = new TableQuery<OpenIddictAtsToken>().Where(TableQuery.GenerateFilterCondition(nameof(OpenIddictAtsToken.ApplicationId), QueryComparisons.Equal, application.Id))
+                var tokenDeleteQuery = new TableQuery<OpenIddictAtsToken>().Where(TableQuery.GenerateFilterCondition(nameof(OpenIddictAtsToken.ApplicationId), QueryComparisons.Equal, application.PartitionKey))
                     .Select(new string[] { TableConstants.PartitionKey, TableConstants.RowKey });
 
                 await OpenIddictAtsHelpers.DeleteAsync(ct, tokenDeleteQuery);
@@ -180,7 +180,7 @@ namespace OpenIddict.Ats
 
             var query = ct.CreateQuery<TApplication>()
                 .Take(1)
-                .Where(TableQuery.GenerateFilterCondition(nameof(OpenIddictAtsApplication.Id), QueryComparisons.Equal, identifier));
+                .Where(TableQuery.GenerateFilterCondition(nameof(OpenIddictAtsApplication.PartitionKey), QueryComparisons.Equal, identifier));
 
             var queryResult = await query.ExecuteSegmentedAsync(default, cancellationToken);
 
@@ -406,7 +406,7 @@ namespace OpenIddict.Ats
                 throw new ArgumentNullException(nameof(application));
             }
 
-            return new ValueTask<string?>(ConvertIdentifierToString(application.Id));
+            return new ValueTask<string?>(ConvertIdentifierToString(application.PartitionKey));
         }
 
         /// <inheritdoc/>

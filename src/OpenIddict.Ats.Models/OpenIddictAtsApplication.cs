@@ -72,12 +72,6 @@ namespace OpenIddict.Ats.Models
         public virtual string? DisplayNames { get; set; }
 
         /// <summary>
-        /// Gets or sets the unique identifier associated with the current application.
-        /// </summary>
-        //[BsonId, BsonRequired]
-        public virtual string? Id { get; set; }
-
-        /// <summary>
         /// Gets or sets the permissions associated with the current application.
         /// </summary>
         public virtual string? Permissions { get; set; }
