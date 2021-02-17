@@ -111,9 +111,9 @@ namespace OpenIddict.Ats
             var tableClient = await Context.GetTableClientAsync(cancellationToken);
             CloudTable ct = tableClient.GetTableReference(Options.CurrentValue.ApplicationsCollectionName);
 
-            TableOperation insertOrMergeOperation = TableOperation.InsertOrMerge(application);
+            TableOperation insertOperation = TableOperation.Insert(application);
 
-            await ct.ExecuteAsync(insertOrMergeOperation, cancellationToken);
+            await ct.ExecuteAsync(insertOperation, cancellationToken);
         }
 
         /// <inheritdoc/>
