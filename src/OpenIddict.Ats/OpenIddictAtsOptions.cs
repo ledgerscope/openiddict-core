@@ -18,12 +18,12 @@ namespace OpenIddict.Ats
         /// <summary>
         /// Gets or sets the name of the applications collection (by default, openiddict.applications).
         /// </summary>
-        public string ApplicationsCollectionName { get; set; } = "openiddict.applications";
+        public string ApplicationsCollectionName { get; set; } = "OpenIddictApplications";
 
         /// <summary>
         /// Gets or sets the name of the authorizations collection (by default, openiddict.authorizations).
         /// </summary>
-        public string AuthorizationsCollectionName { get; set; } = "openiddict.authorizations";
+        public string AuthorizationsCollectionName { get; set; } = "OpenIddictAuthorizations";
 
         /// <summary>
         /// Gets or sets the <see cref="ICloudTableClient"/> used by the OpenIddict stores.
@@ -34,11 +34,11 @@ namespace OpenIddict.Ats
         /// <summary>
         /// Gets or sets the name of the scopes collection (by default, openiddict.scopes).
         /// </summary>
-        public string ScopesCollectionName { get; set; } = "openiddict.scopes";
+        public string ScopesCollectionName { get; set; } = "OpenIddictScopes";
 
         /// <summary>
         /// Gets or sets the name of the tokens collection (by default, openiddict.tokens).
         /// </summary>
-        public string TokensCollectionName { get; set; } = "openiddict.tokens";
+        public string TokensCollectionName { get; set; } = "OpenIddictTokens";
     }
 }
