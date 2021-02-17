@@ -10,6 +10,9 @@ namespace OpenIddict.Abstractions
     /// </summary>
     public class OpenIddictApplicationDescriptor
     {
+        public string? PartitionKey { get; set; }
+        public string? RowKey { get; set; }
+
         /// <summary>
         /// Gets or sets the client identifier associated with the application.
         /// </summary>
