@@ -178,11 +178,12 @@ namespace OpenIddict.Ats
             var tableClient = await Context.GetTableClientAsync(cancellationToken);
             CloudTable ct = tableClient.GetTableReference(Options.CurrentValue.ApplicationsCollectionName);
 
-            var query = ct.CreateQuery<TApplication>()
-                .Take(1)
-                .Where(TableQuery.GenerateFilterCondition(nameof(OpenIddictAtsApplication.PartitionKey), QueryComparisons.Equal, identifier));
+            //TODO KAR .Take(1)
+            var condition = TableQuery.GenerateFilterCondition(nameof(OpenIddictAtsApplication.PartitionKey), QueryComparisons.Equal, identifier);
 
-            var queryResult = await query.ExecuteSegmentedAsync(default, cancellationToken);
+            var query = new TableQuery<TApplication>().Where(condition);
+
+            var queryResult = await ct.ExecuteQuerySegmentedAsync(query, default, cancellationToken);
 
             return queryResult.Results.FirstOrDefault();
         }
