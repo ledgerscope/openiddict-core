@@ -81,8 +81,8 @@ namespace OpenIddict.Ats
 
             var tableClient = await Context.GetTableClientAsync(cancellationToken);
             CloudTable ct = tableClient.GetTableReference(Options.CurrentValue.ApplicationsCollectionName);
-
-            var tableQuery = ct.CreateQuery<TAuthorization>();
+                        
+            var tableQuery = new TableQuery<TAuthorization>();
 
             long counter = 0;
             var continuationToken = default(TableContinuationToken);
@@ -400,8 +400,9 @@ namespace OpenIddict.Ats
                 var tableClient = await Context.GetTableClientAsync(cancellationToken);
                 CloudTable ct = tableClient.GetTableReference(Options.CurrentValue.AuthorizationsCollectionName);
 
-                var query = ct.CreateQuery<TAuthorization>()
-                    .Where(TableQuery.GenerateFilterCondition(nameof(OpenIddictAtsAuthorization.ApplicationId), QueryComparisons.Equal, identifier));
+                var condition = TableQuery.GenerateFilterCondition(nameof(OpenIddictAtsAuthorization.ApplicationId), QueryComparisons.Equal, identifier);
+
+                var query = new TableQuery<TAuthorization>().Where(condition);
 
                 var continuationToken = default(TableContinuationToken);
 
@@ -456,8 +457,9 @@ namespace OpenIddict.Ats
                 var tableClient = await Context.GetTableClientAsync(cancellationToken);
                 CloudTable ct = tableClient.GetTableReference(Options.CurrentValue.AuthorizationsCollectionName);
 
-                var query = ct.CreateQuery<TAuthorization>()
-                    .Where(TableQuery.GenerateFilterCondition(nameof(OpenIddictAtsAuthorization.Subject), QueryComparisons.Equal, subject));
+                var condition = TableQuery.GenerateFilterCondition(nameof(OpenIddictAtsAuthorization.Subject), QueryComparisons.Equal, subject);
+
+                var query = new TableQuery<TAuthorization>().Where(condition);
 
                 var continuationToken = default(TableContinuationToken);
 
@@ -503,8 +505,9 @@ namespace OpenIddict.Ats
 
             var tableClient = await Context.GetTableClientAsync(cancellationToken);
             CloudTable ct = tableClient.GetTableReference(Options.CurrentValue.AuthorizationsCollectionName);
+                        
+            var cloudQuery = new TableQuery<TAuthorization>();
 
-            var cloudQuery = ct.CreateQuery<TAuthorization>().AsQueryable();
             var result = query(cloudQuery, state);
 
             //TODO KAR make async
@@ -536,7 +539,7 @@ namespace OpenIddict.Ats
                 throw new ArgumentNullException(nameof(authorization));
             }
 
-            return new ValueTask<string?>(ConvertIdentifierToString(authorization.Id));
+            return new ValueTask<string?>(ConvertIdentifierToString(authorization.PartitionKey));
 
         }
 
@@ -690,8 +693,8 @@ namespace OpenIddict.Ats
             {
                 var tableClient = await Context.GetTableClientAsync(cancellationToken);
                 CloudTable ct = tableClient.GetTableReference(Options.CurrentValue.AuthorizationsCollectionName);
-
-                var tableQuery = ct.CreateQuery<TAuthorization>();
+                                
+                var tableQuery = new TableQuery<TAuthorization>();
 
                 var continuationToken = default(TableContinuationToken);
 

@@ -81,8 +81,8 @@ namespace OpenIddict.Ats
 
             var tableClient = await Context.GetTableClientAsync(cancellationToken);
             CloudTable ct = tableClient.GetTableReference(Options.CurrentValue.ApplicationsCollectionName);
-
-            var tableQuery = ct.CreateQuery<TApplication>();
+                        
+            var tableQuery = new TableQuery<TApplication>();
 
             long counter = 0;
             var continuationToken = default(TableContinuationToken);
@@ -224,7 +224,7 @@ namespace OpenIddict.Ats
                 var tableClient = await Context.GetTableClientAsync(cancellationToken);
                 CloudTable ct = tableClient.GetTableReference(Options.CurrentValue.ApplicationsCollectionName);
 
-                var query = ct.CreateQuery<TApplication>();
+                var query = new TableQuery<TApplication>();
 
                 var continuationToken = default(TableContinuationToken);
 
@@ -262,8 +262,8 @@ namespace OpenIddict.Ats
             {
                 var tableClient = await Context.GetTableClientAsync(cancellationToken);
                 CloudTable ct = tableClient.GetTableReference(Options.CurrentValue.ApplicationsCollectionName);
-
-                var query = ct.CreateQuery<TApplication>();
+                                
+                var query = new TableQuery<TApplication>();
 
                 var continuationToken = default(TableContinuationToken);
 
@@ -613,8 +613,8 @@ namespace OpenIddict.Ats
             {
                 var tableClient = await Context.GetTableClientAsync(cancellationToken);
                 CloudTable ct = tableClient.GetTableReference(Options.CurrentValue.ApplicationsCollectionName);
-
-                var tableQuery = ct.CreateQuery<TApplication>();
+                                
+                var tableQuery = new TableQuery<TApplication>();
 
                 var continuationToken = default(TableContinuationToken);
 
