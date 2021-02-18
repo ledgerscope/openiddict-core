@@ -205,13 +205,6 @@ namespace OpenIddict.Ats
             var queryResult = await ct.ExecuteQuerySegmentedAsync(query, default, cancellationToken);
 
             return queryResult.Results.FirstOrDefault();
-
-            //var query = ct.CreateQuery<TApplication>()
-            //    .Where(TableQuery.GenerateFilterCondition(nameof(OpenIddictAtsApplication.ClientId), QueryComparisons.Equal, identifier));
-
-            //var queryResult = await query.ExecuteSegmentedAsync(default, cancellationToken);
-
-            //return queryResult.Results.FirstOrDefault();
         }
 
         /// <inheritdoc/>

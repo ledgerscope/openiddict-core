@@ -111,9 +111,13 @@ namespace OpenIddict.Ats
             var tableClient = await Context.GetTableClientAsync(cancellationToken);
             CloudTable ct = tableClient.GetTableReference(Options.CurrentValue.AuthorizationsCollectionName);
 
-            TableOperation insertOrMergeOperation = TableOperation.InsertOrMerge(authorization);
+            TableOperation insertOperation = TableOperation.Insert(authorization);
 
-            await ct.ExecuteAsync(insertOrMergeOperation, cancellationToken);
+            insertOperation.Entity.PartitionKey = authorization.ApplicationId;
+            insertOperation.Entity.RowKey = authorization.Subject;
+            insertOperation.Entity.Timestamp = DateTime.UtcNow;
+
+            await ct.ExecuteAsync(insertOperation, cancellationToken);
         }
 
         /// <inheritdoc/>
@@ -183,8 +187,7 @@ namespace OpenIddict.Ats
                     TableOperators.And,
                     clientFilter);
 
-                var query = ct.CreateQuery<TAuthorization>()
-                    .Where(filter);
+                var query = new TableQuery<TAuthorization>().Where(filter);
 
                 var continuationToken = default(TableContinuationToken);
 
@@ -235,8 +238,7 @@ namespace OpenIddict.Ats
 
                 var filters = OpenIddictAtsHelpers.CombineFilters(TableOperators.And, new string[] { subjectFilter, clientFilter, statusFilter });
 
-                var query = ct.CreateQuery<TAuthorization>()
-                    .Where(filters);
+                var query = new TableQuery<TAuthorization>().Where(filters);
 
                 var continuationToken = default(TableContinuationToken);
 
@@ -293,8 +295,7 @@ namespace OpenIddict.Ats
 
                 var filters = OpenIddictAtsHelpers.CombineFilters(TableOperators.And, new string[] { subjectFilter, clientFilter, statusFilter, typeFilter });
 
-                var query = ct.CreateQuery<TAuthorization>()
-                    .Where(filters);
+                var query = new TableQuery<TAuthorization>().Where(filters);
 
                 var continuationToken = default(TableContinuationToken);
 
@@ -352,8 +353,7 @@ namespace OpenIddict.Ats
 
                 var filters = OpenIddictAtsHelpers.CombineFilters(TableOperators.And, new string[] { subjectFilter, clientFilter, statusFilter, typeFilter });
 
-                var query = ct.CreateQuery<TAuthorization>()
-                    .Where(filters);
+                var query = new TableQuery<TAuthorization>().Where(filters);
 
                 var continuationToken = default(TableContinuationToken);
 
@@ -430,9 +430,10 @@ namespace OpenIddict.Ats
             var tableClient = await Context.GetTableClientAsync(cancellationToken);
             CloudTable ct = tableClient.GetTableReference(Options.CurrentValue.AuthorizationsCollectionName);
 
-            var query = ct.CreateQuery<TAuthorization>()
-                .Take(1)
-                .Where(TableQuery.GenerateFilterCondition(nameof(OpenIddictAtsAuthorization.Id), QueryComparisons.Equal, identifier));
+            //TODO KAR  .Take(1)
+            var condition = TableQuery.GenerateFilterCondition(nameof(OpenIddictAtsAuthorization.Id), QueryComparisons.Equal, identifier);
+
+            var query = new TableQuery<TAuthorization>().Where(condition);
 
             var queryResult = await query.ExecuteSegmentedAsync(default, cancellationToken);
 
