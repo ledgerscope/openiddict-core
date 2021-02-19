@@ -436,7 +436,7 @@ namespace OpenIddict.Ats
 
             var query = new TableQuery<TAuthorization>().Where(condition);
 
-            var queryResult = await query.ExecuteSegmentedAsync(default, cancellationToken);
+            var queryResult = await ct.ExecuteQuerySegmentedAsync(query, default, cancellationToken);
 
             return queryResult.Results.FirstOrDefault();
         }
