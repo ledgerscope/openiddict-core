@@ -57,11 +57,6 @@ namespace OpenIddict.Ats.Models
         public virtual string? DisplayNames { get; set; }
 
         /// <summary>
-        /// Gets or sets the unique identifier associated with the current scope.
-        /// </summary>
-        public virtual string? Id { get; set; }
-
-        /// <summary>
         /// Gets or sets the unique name associated with the current scope.
         /// </summary>
         public virtual string? Name { get; set; }

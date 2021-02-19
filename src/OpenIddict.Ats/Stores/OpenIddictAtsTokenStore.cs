@@ -80,8 +80,8 @@ namespace OpenIddict.Ats
 
             var tableClient = await Context.GetTableClientAsync(cancellationToken);
             CloudTable ct = tableClient.GetTableReference(Options.CurrentValue.ApplicationsCollectionName);
-
-            var tableQuery = ct.CreateQuery<TToken>();
+                        
+            var tableQuery = new TableQuery<TToken>();
 
             long counter = 0;
             var continuationToken = default(TableContinuationToken);
@@ -126,7 +126,7 @@ namespace OpenIddict.Ats
             var tableClient = await Context.GetTableClientAsync(cancellationToken);
             CloudTable ct = tableClient.GetTableReference(Options.CurrentValue.TokensCollectionName);
 
-            var idFilter = TableQuery.GenerateFilterCondition(nameof(OpenIddictAtsToken.Id), QueryComparisons.Equal, token.Id);
+            var idFilter = TableQuery.GenerateFilterCondition(nameof(OpenIddictAtsToken.PartitionKey), QueryComparisons.Equal, token.PartitionKey);
             var tokenFilter = TableQuery.GenerateFilterCondition(nameof(OpenIddictAtsToken.ConcurrencyToken), QueryComparisons.Equal, token.ConcurrencyToken);
 
             var filter = TableQuery.CombineFilters(idFilter,
@@ -174,8 +174,7 @@ namespace OpenIddict.Ats
                     TableOperators.And,
                     subjectFilter);
 
-                var query = ct.CreateQuery<TToken>()
-                    .Where(filter);
+                var query = new TableQuery<TToken>().Where(filter);
 
                 var continuationToken = default(TableContinuationToken);
 
@@ -226,8 +225,7 @@ namespace OpenIddict.Ats
                                 
                 var filters = OpenIddictAtsHelpers.CombineFilters(TableOperators.And, new string[] { subjectFilter, clientFilter, statusFilter });
 
-                var query = ct.CreateQuery<TToken>()
-                    .Where(filters);
+                var query = new TableQuery<TToken>().Where(filters);
 
                 var continuationToken = default(TableContinuationToken);
 
@@ -284,8 +282,7 @@ namespace OpenIddict.Ats
 
                 var filters = OpenIddictAtsHelpers.CombineFilters(TableOperators.And, new string[] { subjectFilter, clientFilter, statusFilter, typeFilter });
 
-                var query = ct.CreateQuery<TToken>()
-                    .Where(filters);
+                var query = new TableQuery<TToken>().Where(filters);
 
                 var continuationToken = default(TableContinuationToken);
 
@@ -317,9 +314,10 @@ namespace OpenIddict.Ats
             {
                 var tableClient = await Context.GetTableClientAsync(cancellationToken);
                 CloudTable ct = tableClient.GetTableReference(Options.CurrentValue.TokensCollectionName);
+                                
+                var condition = TableQuery.GenerateFilterCondition(nameof(OpenIddictAtsToken.ApplicationId), QueryComparisons.Equal, identifier);
 
-                var query = ct.CreateQuery<TToken>()
-                    .Where(TableQuery.GenerateFilterCondition(nameof(OpenIddictAtsToken.ApplicationId), QueryComparisons.Equal, identifier));
+                var query = new TableQuery<TToken>().Where(condition);
 
                 var continuationToken = default(TableContinuationToken);
 
@@ -351,9 +349,10 @@ namespace OpenIddict.Ats
             {
                 var tableClient = await Context.GetTableClientAsync(cancellationToken);
                 CloudTable ct = tableClient.GetTableReference(Options.CurrentValue.TokensCollectionName);
+                                
+                var condition = TableQuery.GenerateFilterCondition(nameof(OpenIddictAtsToken.AuthorizationId), QueryComparisons.Equal, identifier);
 
-                var query = ct.CreateQuery<TToken>()
-                    .Where(TableQuery.GenerateFilterCondition(nameof(OpenIddictAtsToken.AuthorizationId), QueryComparisons.Equal, identifier));
+                var query = new TableQuery<TToken>().Where(condition);
 
                 var continuationToken = default(TableContinuationToken);
 
@@ -381,10 +380,11 @@ namespace OpenIddict.Ats
 
             var tableClient = await Context.GetTableClientAsync(cancellationToken);
             CloudTable ct = tableClient.GetTableReference(Options.CurrentValue.TokensCollectionName);
+                        
+            //TODO KAR .Take(1)
+            var condition = TableQuery.GenerateFilterCondition(nameof(OpenIddictAtsToken.PartitionKey), QueryComparisons.Equal, identifier);
 
-            var query = ct.CreateQuery<TToken>()
-                .Take(1)
-                .Where(TableQuery.GenerateFilterCondition(nameof(OpenIddictAtsToken.Id), QueryComparisons.Equal, identifier));
+            var query = new TableQuery<TToken>().Where(condition);
 
             var queryResult = await query.ExecuteSegmentedAsync(default, cancellationToken);
 
@@ -401,10 +401,11 @@ namespace OpenIddict.Ats
 
             var tableClient = await Context.GetTableClientAsync(cancellationToken);
             CloudTable ct = tableClient.GetTableReference(Options.CurrentValue.TokensCollectionName);
+                        
+            //TODO KAR .Take(1)
+            var condition = TableQuery.GenerateFilterCondition(nameof(OpenIddictAtsToken.ReferenceId), QueryComparisons.Equal, identifier);
 
-            var query = ct.CreateQuery<TToken>()
-                .Take(1)
-                .Where(TableQuery.GenerateFilterCondition(nameof(OpenIddictAtsToken.ReferenceId), QueryComparisons.Equal, identifier));
+            var query = new TableQuery<TToken>().Where(condition);
 
             var queryResult = await query.ExecuteSegmentedAsync(default, cancellationToken);
 
@@ -425,9 +426,10 @@ namespace OpenIddict.Ats
             {
                 var tableClient = await Context.GetTableClientAsync(cancellationToken);
                 CloudTable ct = tableClient.GetTableReference(Options.CurrentValue.TokensCollectionName);
+                                
+                var condition = TableQuery.GenerateFilterCondition(nameof(OpenIddictAtsToken.Subject), QueryComparisons.Equal, subject);
 
-                var query = ct.CreateQuery<TToken>()
-                    .Where(TableQuery.GenerateFilterCondition(nameof(OpenIddictAtsToken.Subject), QueryComparisons.Equal, subject));
+                var query = new TableQuery<TToken>().Where(condition);
 
                 var continuationToken = default(TableContinuationToken);
 
@@ -538,7 +540,7 @@ namespace OpenIddict.Ats
                 throw new ArgumentNullException(nameof(token));
             }
 
-            return new ValueTask<string?>(token.Id?.ToString());
+            return new ValueTask<string?>(token.PartitionKey?.ToString());
         }
 
         /// <inheritdoc/>
@@ -700,7 +702,7 @@ namespace OpenIddict.Ats
                 var tableClient = await Context.GetTableClientAsync(cancellationToken);
                 CloudTable ct = tableClient.GetTableReference(Options.CurrentValue.TokensCollectionName);
 
-                var tableQuery = ct.CreateQuery<TToken>();
+                var tableQuery = new TableQuery<TToken>();
 
                 var continuationToken = default(TableContinuationToken);
 
@@ -731,7 +733,7 @@ namespace OpenIddict.Ats
             var identifiers =
                 (from token in tokenQuery
                  join authorization in authQuery
-                            on token.AuthorizationId equals authorization.Id into authorizations
+                            on token.AuthorizationId equals authorization.PartitionKey into authorizations
                  where token.CreationDate < threshold.UtcDateTime
                  where (token.Status != Statuses.Inactive && token.Status != Statuses.Valid) ||
                               token.ExpirationDate < DateTime.UtcNow ||

@@ -113,8 +113,8 @@ namespace OpenIddict.Ats
 
             TableOperation insertOperation = TableOperation.Insert(authorization);
 
-            insertOperation.Entity.PartitionKey = authorization.ApplicationId ?? "AppId"; //TODO KAR
-            insertOperation.Entity.RowKey = authorization.Subject ?? "Subject"; //TODO KAR
+            insertOperation.Entity.PartitionKey = authorization.ApplicationId; //TODO KAR
+            insertOperation.Entity.RowKey = authorization.Subject; //TODO KAR
             insertOperation.Entity.Timestamp = DateTime.UtcNow;
 
             await ct.ExecuteAsync(insertOperation, cancellationToken);
@@ -131,7 +131,7 @@ namespace OpenIddict.Ats
             var tableClient = await Context.GetTableClientAsync(cancellationToken);
             CloudTable ct = tableClient.GetTableReference(Options.CurrentValue.AuthorizationsCollectionName);
 
-            var idFilter = TableQuery.GenerateFilterCondition(nameof(OpenIddictAtsAuthorization.Id), QueryComparisons.Equal, authorization.Id);
+            var idFilter = TableQuery.GenerateFilterCondition(nameof(OpenIddictAtsAuthorization.PartitionKey), QueryComparisons.Equal, authorization.PartitionKey);
             var tokenFilter = TableQuery.GenerateFilterCondition(nameof(OpenIddictAtsAuthorization.ConcurrencyToken), QueryComparisons.Equal, authorization.ConcurrencyToken);
 
             var filter = TableQuery.CombineFilters(idFilter,
@@ -148,7 +148,7 @@ namespace OpenIddict.Ats
                 // Delete the tokens associated with the authorization.
                 ct = tableClient.GetTableReference(Options.CurrentValue.TokensCollectionName);
 
-                var tokenDeleteQuery = new TableQuery<OpenIddictAtsToken>().Where(TableQuery.GenerateFilterCondition(nameof(OpenIddictAtsToken.AuthorizationId), QueryComparisons.Equal, authorization.Id))
+                var tokenDeleteQuery = new TableQuery<OpenIddictAtsToken>().Where(TableQuery.GenerateFilterCondition(nameof(OpenIddictAtsToken.AuthorizationId), QueryComparisons.Equal, authorization.PartitionKey))
                     .Select(new string[] { TableConstants.PartitionKey, TableConstants.RowKey });
 
                 await OpenIddictAtsHelpers.DeleteAsync(ct, tokenDeleteQuery);
@@ -432,7 +432,7 @@ namespace OpenIddict.Ats
             CloudTable ct = tableClient.GetTableReference(Options.CurrentValue.AuthorizationsCollectionName);
 
             //TODO KAR  .Take(1)
-            var condition = TableQuery.GenerateFilterCondition(nameof(OpenIddictAtsAuthorization.Id), QueryComparisons.Equal, identifier);
+            var condition = TableQuery.GenerateFilterCondition(nameof(OpenIddictAtsAuthorization.PartitionKey), QueryComparisons.Equal, identifier);
 
             var query = new TableQuery<TAuthorization>().Where(condition);
 
@@ -725,7 +725,7 @@ namespace OpenIddict.Ats
             var identifiers =
                 (from authorization in authQuery
                        join token in tokenQuery
-                                  on authorization.Id equals token.AuthorizationId into tokens
+                                  on authorization.PartitionKey equals token.AuthorizationId into tokens
                        where authorization.CreationDate < threshold.UtcDateTime
                        where authorization.Status != Statuses.Valid ||
                             (authorization.Type == AuthorizationTypes.AdHoc && !tokens.Any())

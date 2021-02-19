@@ -80,8 +80,8 @@ namespace OpenIddict.Ats
 
             var tableClient = await Context.GetTableClientAsync(cancellationToken);
             CloudTable ct = tableClient.GetTableReference(Options.CurrentValue.ApplicationsCollectionName);
-
-            var tableQuery = ct.CreateQuery<TScope>();
+                        
+            var tableQuery = new TableQuery<TScope>();
 
             long counter = 0;
             var continuationToken = default(TableContinuationToken);
@@ -126,7 +126,7 @@ namespace OpenIddict.Ats
             var tableClient = await Context.GetTableClientAsync(cancellationToken);
             CloudTable ct = tableClient.GetTableReference(Options.CurrentValue.ScopesCollectionName);
 
-            var idFilter = TableQuery.GenerateFilterCondition(nameof(OpenIddictAtsScope.Id), QueryComparisons.Equal, scope.Id);
+            var idFilter = TableQuery.GenerateFilterCondition(nameof(OpenIddictAtsScope.PartitionKey), QueryComparisons.Equal, scope.PartitionKey);
             var tokenFilter = TableQuery.GenerateFilterCondition(nameof(OpenIddictAtsScope.ConcurrencyToken), QueryComparisons.Equal, scope.ConcurrencyToken);
 
             var filter = TableQuery.CombineFilters(idFilter,
@@ -157,9 +157,10 @@ namespace OpenIddict.Ats
             var tableClient = await Context.GetTableClientAsync(cancellationToken);
             CloudTable ct = tableClient.GetTableReference(Options.CurrentValue.ScopesCollectionName);
 
-            var query = ct.CreateQuery<TScope>()
-                .Take(1)
-                .Where(TableQuery.GenerateFilterCondition(nameof(OpenIddictAtsScope.Id), QueryComparisons.Equal, identifier));
+            //TODO KAR .Take(1)
+            var condition = TableQuery.GenerateFilterCondition(nameof(OpenIddictAtsScope.PartitionKey), QueryComparisons.Equal, identifier);
+
+            var query = new TableQuery<TScope>().Where(condition);
 
             var queryResult = await query.ExecuteSegmentedAsync(default, cancellationToken);
 
@@ -177,9 +178,10 @@ namespace OpenIddict.Ats
             var tableClient = await Context.GetTableClientAsync(cancellationToken);
             CloudTable ct = tableClient.GetTableReference(Options.CurrentValue.ScopesCollectionName);
 
-            var query = ct.CreateQuery<TScope>()
-                .Take(1)
-                .Where(TableQuery.GenerateFilterCondition(nameof(OpenIddictAtsScope.Name), QueryComparisons.Equal, name));
+            //TODO KAR .Take(1)
+            var condition = TableQuery.GenerateFilterCondition(nameof(OpenIddictAtsScope.Name), QueryComparisons.Equal, name);
+
+            var query = new TableQuery<TScope>().Where(condition);
 
             var queryResult = await query.ExecuteSegmentedAsync(default, cancellationToken);
 
@@ -201,7 +203,7 @@ namespace OpenIddict.Ats
                 var tableClient = await Context.GetTableClientAsync(cancellationToken);
                 CloudTable ct = tableClient.GetTableReference(Options.CurrentValue.ScopesCollectionName);
 
-                var query = ct.CreateQuery<TScope>();
+                var query = new TableQuery<TScope>();
 
                 var continuationToken = default(TableContinuationToken);
 
@@ -234,8 +236,8 @@ namespace OpenIddict.Ats
             {
                 var tableClient = await Context.GetTableClientAsync(cancellationToken);
                 CloudTable ct = tableClient.GetTableReference(Options.CurrentValue.ScopesCollectionName);
-
-                var query = ct.CreateQuery<TScope>();
+                                
+                var query = new TableQuery<TScope>();
 
                 var continuationToken = default(TableContinuationToken);
 
@@ -366,7 +368,7 @@ namespace OpenIddict.Ats
                 throw new ArgumentNullException(nameof(scope));
             }
 
-            return new ValueTask<string?>(scope.Id?.ToString());
+            return new ValueTask<string?>(scope.PartitionKey?.ToString());
         }
 
         /// <inheritdoc/>
@@ -498,8 +500,8 @@ namespace OpenIddict.Ats
             {
                 var tableClient = await Context.GetTableClientAsync(cancellationToken);
                 CloudTable ct = tableClient.GetTableReference(Options.CurrentValue.ScopesCollectionName);
-
-                var tableQuery = ct.CreateQuery<TScope>();
+                                
+                var tableQuery = new TableQuery<TScope>();
 
                 var continuationToken = default(TableContinuationToken);
 

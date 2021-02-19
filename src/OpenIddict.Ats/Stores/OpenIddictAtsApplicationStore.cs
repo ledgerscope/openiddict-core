@@ -113,8 +113,8 @@ namespace OpenIddict.Ats
 
             TableOperation insertOperation = TableOperation.Insert(application);
 
-            insertOperation.Entity.PartitionKey = application.ClientId;
-            insertOperation.Entity.RowKey = application.DisplayName;
+            insertOperation.Entity.PartitionKey = application.ClientId; //TODO KAR
+            insertOperation.Entity.RowKey = application.DisplayName; //TODO KAR
             insertOperation.Entity.Timestamp = DateTime.UtcNow;
 
             await ct.ExecuteAsync(insertOperation, cancellationToken);

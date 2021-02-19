@@ -57,11 +57,6 @@ namespace OpenIddict.Ats.Models
         public virtual DateTime? CreationDate { get; set; }
 
         /// <summary>
-        /// Gets or sets the unique identifier associated with the current authorization.
-        /// </summary>
-        public virtual string? Id { get; set; }
-
-        /// <summary>
         /// Gets or sets the additional properties associated with the current authorization.
         /// </summary>
         public virtual string? Properties { get; set; }

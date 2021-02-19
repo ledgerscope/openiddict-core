@@ -66,11 +66,6 @@ namespace OpenIddict.Ats.Models
         public virtual DateTime? ExpirationDate { get; set; }
 
         /// <summary>
-        /// Gets or sets the unique identifier associated with the current token.
-        /// </summary>
-        public virtual string? Id { get; set; }
-
-        /// <summary>
         /// Gets or sets the payload of the current token, if applicable.
         /// Note: this property is only used for reference tokens
         /// and may be encrypted for security reasons.
