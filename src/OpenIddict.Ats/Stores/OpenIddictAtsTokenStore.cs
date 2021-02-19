@@ -480,8 +480,10 @@ namespace OpenIddict.Ats
             var tableClient = await Context.GetTableClientAsync(cancellationToken);
             CloudTable ct = tableClient.GetTableReference(Options.CurrentValue.AuthorizationsCollectionName);
 
-            var cloudQuery = ct.CreateQuery<TToken>().AsQueryable();
-            var result = query(cloudQuery, state);
+            var cloudQuery = new TableQuery<TToken>();
+            var queryResult = await ct.ExecuteQuerySegmentedAsync(cloudQuery, default, cancellationToken);
+
+            var result = query(queryResult.Results.AsQueryable(), state);
 
             //TODO KAR make async
             //.AsTableQuery().FirstOrDefaultAsync so how can I get it working here?
@@ -730,13 +732,15 @@ namespace OpenIddict.Ats
             CloudTable ctToken = tableClient.GetTableReference(Options.CurrentValue.TokensCollectionName);
             CloudTable ctAuth = tableClient.GetTableReference(Options.CurrentValue.AuthorizationsCollectionName);
 
-            var tokenQuery = ctToken.CreateQuery<TToken>();
+            var tokenQuery = new TableQuery<TToken>();
+            var tokenQueryResult = await ctToken.ExecuteQuerySegmentedAsync(tokenQuery, default, cancellationToken);
 
-            var authQuery = ctAuth.CreateQuery<OpenIddictAtsAuthorization>();
+            var authQuery = new TableQuery<OpenIddictAtsAuthorization>();
+            var authQueryResult = await ctAuth.ExecuteQuerySegmentedAsync(authQuery, default, cancellationToken);
 
             var identifiers =
-                (from token in tokenQuery
-                 join authorization in authQuery
+                (from token in tokenQueryResult
+                 join authorization in authQueryResult
                             on token.AuthorizationId equals authorization.PartitionKey into authorizations
                  where token.CreationDate < threshold.UtcDateTime
                  where (token.Status != Statuses.Inactive && token.Status != Statuses.Valid) ||

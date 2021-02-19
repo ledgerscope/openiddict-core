@@ -718,14 +718,16 @@ namespace OpenIddict.Ats
             CloudTable ctAuth = tableClient.GetTableReference(Options.CurrentValue.AuthorizationsCollectionName);
             CloudTable ctToken = tableClient.GetTableReference(Options.CurrentValue.TokensCollectionName);
 
-            var authQuery = ctAuth.CreateQuery<TAuthorization>();
+            var authQuery = new TableQuery<TAuthorization>();
+            var authQueryResult = await ctAuth.ExecuteQuerySegmentedAsync(authQuery, default, cancellationToken);
 
-            var tokenQuery = ctToken.CreateQuery<OpenIddictAtsToken>();
+            var tokenQuery = new TableQuery<OpenIddictAtsToken>();
+            var tokenQueryResult = await ctToken.ExecuteQuerySegmentedAsync(tokenQuery, default, cancellationToken);
 
             var identifiers =
-                (from authorization in authQuery
-                       join token in tokenQuery
-                                  on authorization.PartitionKey equals token.AuthorizationId into tokens
+                (from authorization in authQueryResult
+                        join token in tokenQueryResult
+                            on authorization.PartitionKey equals token.AuthorizationId into tokens
                        where authorization.CreationDate < threshold.UtcDateTime
                        where authorization.Status != Statuses.Valid ||
                             (authorization.Type == AuthorizationTypes.AdHoc && !tokens.Any())

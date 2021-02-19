@@ -274,8 +274,10 @@ namespace OpenIddict.Ats
             var tableClient = await Context.GetTableClientAsync(cancellationToken);
             CloudTable ct = tableClient.GetTableReference(Options.CurrentValue.AuthorizationsCollectionName);
 
-            var cloudQuery = ct.CreateQuery<TScope>().AsQueryable();
-            var result = query(cloudQuery, state);
+            var cloudQuery = new TableQuery<TScope>();
+            var queryResult = await ct.ExecuteQuerySegmentedAsync(cloudQuery, default, cancellationToken);
+
+            var result = query(queryResult.Results.AsQueryable(), state);
 
             //TODO KAR make async
             //.AsTableQuery().FirstOrDefaultAsync so how can I get it working here?
