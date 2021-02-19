@@ -110,9 +110,13 @@ namespace OpenIddict.Ats
             var tableClient = await Context.GetTableClientAsync(cancellationToken);
             CloudTable ct = tableClient.GetTableReference(Options.CurrentValue.ScopesCollectionName);
 
-            TableOperation insertOrMergeOperation = TableOperation.InsertOrMerge(scope);
+            TableOperation insertOperation = TableOperation.Insert(scope);
 
-            await ct.ExecuteAsync(insertOrMergeOperation, cancellationToken);
+            insertOperation.Entity.PartitionKey = scope.Name; //TODO KAR
+            insertOperation.Entity.RowKey = scope.Description; //TODO KAR
+            insertOperation.Entity.Timestamp = DateTime.UtcNow;
+
+            await ct.ExecuteAsync(insertOperation, cancellationToken);
         }
 
         /// <inheritdoc/>
