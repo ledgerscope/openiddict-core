@@ -112,8 +112,8 @@ namespace OpenIddict.Ats
 
             TableOperation insertOperation = TableOperation.Insert(token);
 
-            insertOperation.Entity.PartitionKey = token.ApplicationId; //TODO KAR
-            insertOperation.Entity.RowKey = token.AuthorizationId; //TODO KAR
+            insertOperation.Entity.PartitionKey = Guid.NewGuid().ToString();
+            insertOperation.Entity.RowKey = Guid.NewGuid().ToString();
             insertOperation.Entity.Timestamp = DateTime.UtcNow;
 
             await ct.ExecuteAsync(insertOperation, cancellationToken);
