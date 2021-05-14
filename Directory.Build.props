@@ -9,7 +9,7 @@
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <Nullable>enable</Nullable>
     <DebugSymbols>true</DebugSymbols>
-    <DebugType>portable</DebugType>
+    <DebugType>embedded</DebugType>
     <SymbolPackageFormat>snupkg</SymbolPackageFormat>
     <CodeAnalysisRuleset>$(MSBuildThisFileDirectory)eng\CodeAnalysis.ruleset</CodeAnalysisRuleset>
     <EnableXlfLocalization>false</EnableXlfLocalization>
