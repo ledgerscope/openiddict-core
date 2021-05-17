@@ -9,4 +9,7 @@
     <PackageTags>$(PackageTags);entityframework;models</PackageTags>
   </PropertyGroup>
 
+  <ItemGroup>
+    <PackageReference Include="System.Collections.Immutable" />
+  </ItemGroup>
 </Project>
