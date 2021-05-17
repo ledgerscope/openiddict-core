@@ -10,7 +10,6 @@
     <Nullable>enable</Nullable>
     <DebugSymbols>true</DebugSymbols>
     <DebugType>embedded</DebugType>
-    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
     <CodeAnalysisRuleset>$(MSBuildThisFileDirectory)eng\CodeAnalysis.ruleset</CodeAnalysisRuleset>
     <EnableXlfLocalization>false</EnableXlfLocalization>
   </PropertyGroup>
@@ -54,7 +53,6 @@
 
   <PropertyGroup Condition=" $(RepoRelativeProjectDir.Contains('src')) ">
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
-    <IncludeSymbols>true</IncludeSymbols>
     <IsPackable>true</IsPackable>
     <IsShipping>true</IsShipping>
     <Serviceable>false</Serviceable>

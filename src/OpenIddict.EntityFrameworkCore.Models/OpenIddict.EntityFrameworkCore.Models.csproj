@@ -8,8 +8,4 @@
     <Description>Relational entities for the OpenIddict Entity Framework Core stores.</Description>
     <PackageTags>$(PackageTags);entityframeworkcore;models</PackageTags>
   </PropertyGroup>
-
-  <ItemGroup>
-    <PackageReference Include="System.Collections.Immutable" />
-  </ItemGroup>
 </Project>
